@@ -1,0 +1,447 @@
+@import "tailwindcss";
+
+/* =========================================================
+   WMS EXPERT CONTROL TOWER — EXECUTIVE SLATE THEME
+   IMPORTANTE:
+   - não altera nenhuma regra de negócio
+   - não altera Supabase/API
+   - atua sobre as classes Tailwind que já existem no projeto
+   ========================================================= */
+
+:root {
+  --background: #0b1422;
+  --foreground: #eef4fb;
+
+  --wms-bg: #0b1422;
+  --wms-bg-2: #0e1929;
+  --wms-sidebar: #0d1726;
+  --wms-surface: #111d2d;
+  --wms-surface-2: #162438;
+  --wms-card: #1a2a40;
+  --wms-card-hover: #20344d;
+
+  --wms-border: rgba(148, 163, 184, 0.18);
+  --wms-border-strong: rgba(148, 163, 184, 0.28);
+
+  --wms-text: #eef4fb;
+  --wms-muted: #a4b3c5;
+  --wms-muted-2: #7f91a8;
+
+  --wms-blue: #38bdf8;
+  --wms-blue-strong: #0ea5e9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+html {
+  background: #0b1422 !important;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 12% -10%, rgba(14, 165, 233, 0.13), transparent 27%),
+    radial-gradient(circle at 94% 8%, rgba(59, 130, 246, 0.10), transparent 25%),
+    linear-gradient(135deg, #0b1422 0%, #0e1929 48%, #0b1727 100%) !important;
+  color: var(--foreground);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.28);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0c1727;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+  border: 2px solid #0c1727;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.46);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #71839a !important;
+}
+
+/* =========================================================
+   SHELL PRINCIPAL
+   A página usa bg-[#05070b] diretamente no JSX.
+   Aqui substituímos visualmente esse fundo.
+   ========================================================= */
+
+main[class~="bg-[#05070b]"] {
+  background:
+    radial-gradient(circle at 10% -12%, rgba(14, 165, 233, 0.13), transparent 29%),
+    radial-gradient(circle at 92% 10%, rgba(59, 130, 246, 0.09), transparent 25%),
+    linear-gradient(135deg, #0b1422 0%, #0e1929 52%, #0b1727 100%) !important;
+}
+
+/* brilho ambiente um pouco mais presente */
+main[class~="bg-[#05070b]"] > div.fixed {
+  opacity: 1 !important;
+}
+
+main[class~="bg-[#05070b]"] > div.fixed > div:first-child {
+  background-color: rgba(56, 189, 248, 0.055) !important;
+}
+
+main[class~="bg-[#05070b]"] > div.fixed > div:nth-child(2) {
+  background-color: rgba(59, 130, 246, 0.045) !important;
+}
+
+/* =========================================================
+   SIDEBAR
+   ========================================================= */
+
+aside[class*="bg-[#070a10]"] {
+  background:
+    linear-gradient(180deg, rgba(16, 28, 45, 0.98) 0%, rgba(11, 22, 37, 0.99) 100%) !important;
+  border-right-color: rgba(148, 163, 184, 0.16) !important;
+  box-shadow: 12px 0 40px rgba(2, 8, 23, 0.18);
+}
+
+/* logos e separadores */
+aside [class*="border-white/"] {
+  border-color: rgba(148, 163, 184, 0.13) !important;
+}
+
+/* itens da navegação: melhora contraste sem alterar estrutura */
+aside a,
+aside button {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+aside a:hover,
+aside button:hover {
+  background-color: rgba(56, 189, 248, 0.055);
+}
+
+/* item ativo atual */
+aside a[class*="bg-sky-500"],
+aside button[class*="bg-sky-500"] {
+  background:
+    linear-gradient(90deg, rgba(14, 165, 233, 0.16), rgba(14, 165, 233, 0.07)) !important;
+  border-color: rgba(56, 189, 248, 0.22) !important;
+  color: #dff6ff !important;
+  box-shadow: inset 3px 0 0 #38bdf8;
+}
+
+/* =========================================================
+   TOPBAR
+   ========================================================= */
+
+section.min-w-0 > header {
+  background: rgba(13, 24, 40, 0.88) !important;
+  border-bottom-color: rgba(148, 163, 184, 0.15) !important;
+  backdrop-filter: blur(18px);
+}
+
+section.min-w-0 > header input {
+  background: rgba(25, 42, 63, 0.82) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+  color: #edf5fd !important;
+}
+
+section.min-w-0 > header input:focus {
+  border-color: rgba(56, 189, 248, 0.42) !important;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.08);
+}
+
+/* =========================================================
+   SUPERFÍCIES TRANSLÚCIDAS USADAS PELO PROJETO
+   Usamos [class~="..."] para atingir exatamente os tokens
+   Tailwind já presentes no JSX.
+   ========================================================= */
+
+[class~="bg-white/[0.015]"] {
+  background-color: rgba(23, 38, 58, 0.50) !important;
+}
+
+[class~="bg-white/[0.025]"] {
+  background-color: rgba(25, 42, 63, 0.78) !important;
+}
+
+[class~="bg-white/[0.03]"] {
+  background-color: rgba(25, 42, 63, 0.72) !important;
+}
+
+[class~="bg-white/[0.035]"] {
+  background-color: rgba(28, 47, 70, 0.80) !important;
+}
+
+[class~="bg-white/[0.04]"] {
+  background-color: rgba(29, 49, 73, 0.82) !important;
+}
+
+[class~="bg-white/[0.045]"] {
+  background-color: rgba(31, 52, 77, 0.84) !important;
+}
+
+[class~="bg-white/[0.05]"] {
+  background-color: rgba(31, 52, 77, 0.86) !important;
+}
+
+[class~="bg-white/[0.06]"] {
+  background-color: rgba(35, 57, 83, 0.88) !important;
+}
+
+[class~="bg-black/20"] {
+  background-color: rgba(7, 15, 27, 0.42) !important;
+}
+
+[class~="bg-black/70"] {
+  background-color: rgba(4, 10, 19, 0.78) !important;
+}
+
+/* bordas */
+[class*="border-white/"] {
+  border-color: rgba(148, 163, 184, 0.16) !important;
+}
+
+/* =========================================================
+   FUNDOS HEXADECIMAIS QUE ESTÃO DIRETAMENTE NO JSX
+   ========================================================= */
+
+[class~="bg-[#080d16]/80"] {
+  background:
+    linear-gradient(180deg, #18283d 0%, #142338 100%) !important;
+  border-color: rgba(148, 163, 184, 0.20) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    0 10px 30px rgba(2, 8, 23, 0.12);
+}
+
+[class~="bg-[#090e17]"] {
+  background: linear-gradient(180deg, #17273b 0%, #122033 100%) !important;
+}
+
+[class~="bg-[#0a1019]"] {
+  background: #17273b !important;
+}
+
+/* =========================================================
+   KANBAN — VISUAL NOVO
+   ========================================================= */
+
+/* coluna */
+[class~="bg-[#080d16]/80"] > div:first-child {
+  min-height: 48px;
+}
+
+/* card */
+[class~="bg-white/[0.025]"][draggable="true"] {
+  background:
+    linear-gradient(145deg, #1c3048 0%, #17283d 100%) !important;
+  border-color: rgba(148, 163, 184, 0.20) !important;
+  box-shadow:
+    0 7px 20px rgba(2, 8, 23, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+[class~="bg-white/[0.025]"][draggable="true"]:hover {
+  background:
+    linear-gradient(145deg, #203751 0%, #1b2f47 100%) !important;
+  border-color: rgba(56, 189, 248, 0.34) !important;
+  box-shadow:
+    0 13px 30px rgba(2, 8, 23, 0.24),
+    0 0 0 1px rgba(56, 189, 248, 0.04);
+  transform: translateY(-1px);
+}
+
+/* card em carregamento */
+[class~="bg-white/[0.025]"][draggable="true"][class*="opacity-50"] {
+  filter: saturate(0.7);
+}
+
+/* tags dentro dos cards */
+[class~="bg-white/[0.025]"][draggable="true"] [class~="bg-white/[0.03]"] {
+  background-color: rgba(43, 65, 91, 0.72) !important;
+  border-color: rgba(148, 163, 184, 0.17) !important;
+  color: #aebed0 !important;
+}
+
+/* linha divisória do card */
+[class~="bg-white/[0.025]"][draggable="true"] [class*="border-t"] {
+  border-color: rgba(148, 163, 184, 0.13) !important;
+}
+
+/* barra de progresso */
+[class~="bg-white/[0.025]"][draggable="true"] [class~="bg-white/[0.05]"] {
+  background-color: rgba(8, 18, 32, 0.72) !important;
+}
+
+/* =========================================================
+   STATUS DO KANBAN
+   ========================================================= */
+
+/* Não iniciado */
+.border-slate-500\/20.bg-slate-500\/5 {
+  background-color: rgba(100, 116, 139, 0.10) !important;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+}
+
+/* Planejado */
+.border-violet-500\/20.bg-violet-500\/5 {
+  background-color: rgba(139, 92, 246, 0.11) !important;
+  border-color: rgba(167, 139, 250, 0.25) !important;
+}
+
+/* Em andamento */
+.border-sky-500\/20.bg-sky-500\/5 {
+  background-color: rgba(14, 165, 233, 0.12) !important;
+  border-color: rgba(56, 189, 248, 0.28) !important;
+}
+
+/* Pausado */
+.border-amber-500\/20.bg-amber-500\/5 {
+  background-color: rgba(245, 158, 11, 0.12) !important;
+  border-color: rgba(251, 191, 36, 0.28) !important;
+}
+
+/* Bloqueado */
+.border-red-500\/20.bg-red-500\/5 {
+  background-color: rgba(239, 68, 68, 0.11) !important;
+  border-color: rgba(248, 113, 113, 0.27) !important;
+}
+
+/* Finalizado */
+.border-emerald-500\/20.bg-emerald-500\/5 {
+  background-color: rgba(16, 185, 129, 0.11) !important;
+  border-color: rgba(52, 211, 153, 0.27) !important;
+}
+
+/* =========================================================
+   TIPOGRAFIA
+   ========================================================= */
+
+.text-slate-600 {
+  color: #71849b !important;
+}
+
+.text-slate-500 {
+  color: #8fa2b8 !important;
+}
+
+.text-slate-400 {
+  color: #a9b8c9 !important;
+}
+
+.text-white {
+  color: #f4f8fc !important;
+}
+
+/* =========================================================
+   INPUT GLOBAL
+   ========================================================= */
+
+.input {
+  min-height: 42px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.20);
+  background: rgba(24, 41, 61, 0.82) !important;
+  color: #eef4fb;
+}
+
+.input:hover {
+  border-color: rgba(148, 163, 184, 0.30);
+  background: rgba(30, 50, 74, 0.88) !important;
+}
+
+.input:focus {
+  border-color: rgba(56, 189, 248, 0.52);
+  background: rgba(30, 50, 74, 0.94) !important;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.09);
+}
+
+.input option {
+  background: #17273b;
+  color: #eef4fb;
+}
+
+/* =========================================================
+   MODAIS
+   ========================================================= */
+
+[class~="bg-[#090e17]"] {
+  border-color: rgba(148, 163, 184, 0.20) !important;
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.38),
+    0 0 0 1px rgba(56, 189, 248, 0.025);
+}
+
+/* =========================================================
+   BOTÕES AZUIS
+   ========================================================= */
+
+button[class*="bg-sky-500"] {
+  box-shadow: 0 8px 25px rgba(14, 165, 233, 0.17);
+}
+
+button[class*="bg-sky-500"]:hover {
+  box-shadow: 0 10px 30px rgba(14, 165, 233, 0.25);
+}
+
+/* =========================================================
+   RESPONSIVO
+   ========================================================= */
+
+@media (max-width: 1023px) {
+  aside[class*="bg-[#070a10]"] {
+    box-shadow: 20px 0 55px rgba(2, 8, 23, 0.35);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

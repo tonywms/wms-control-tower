@@ -174,6 +174,11 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
   const [cockpit, setCockpit] = useState<ProjetoPriorizado | null>(null);
   const [simPrazo, setSimPrazo] = useState("");
   const [simResolverRiscos, setSimResolverRiscos] = useState(false);
+  const [simResponsavelId, setSimResponsavelId] = useState("");
+  const [confirmarDecisao, setConfirmarDecisao] = useState(false);
+  const [justificativaDecisao, setJustificativaDecisao] = useState("");
+  const [aplicandoDecisao, setAplicandoDecisao] = useState(false);
+  const [erroDecisao, setErroDecisao] = useState("");
 
   const carregar = useCallback(async () => {
     try {
@@ -216,6 +221,75 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     return mapa;
   }, [priorizados]);
 
+  const responsaveisDisponiveis = useMemo(() => {
+    const mapa = new Map<string, string>();
+    projetos.forEach((projeto) => {
+      if (projeto.responsavel?.id && projeto.responsavel?.nome) {
+        mapa.set(projeto.responsavel.id, projeto.responsavel.nome);
+      }
+    });
+    return Array.from(mapa.entries())
+      .map(([id, nome]) => ({ id, nome }))
+      .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  }, [projetos]);
+
+  const calcularCargaResponsavel = (
+    responsavelId: string | null | undefined,
+    excluirProjetoId?: string,
+    incluirProjeto?: Projeto,
+  ) => {
+    const carteira = projetos.filter((projeto) => {
+      if (excluirProjetoId && projeto.id === excluirProjetoId) return false;
+      if (["Finalizado", "Cancelado"].includes(projeto.status)) return false;
+      return (projeto.responsavel?.id ?? "") === (responsavelId ?? "");
+    });
+
+    const carteiraFinal =
+      incluirProjeto &&
+      (incluirProjeto.responsavel?.id ?? "") === (responsavelId ?? "") &&
+      !["Finalizado", "Cancelado"].includes(incluirProjeto.status)
+        ? [...carteira, incluirProjeto]
+        : carteira;
+
+    const classificados = carteiraFinal.map(classificar);
+    const ativos = carteiraFinal.length;
+    const atencao = classificados.filter((item) => item.projeto.saude === "Atenção").length;
+    const criticos = classificados.filter((item) => item.projeto.saude === "Crítico").length;
+    const atrasados = carteiraFinal.filter((item) => item.indicadores.projetoAtrasado).length;
+    const bloqueados = carteiraFinal.filter((item) => item.status === "Bloqueado").length;
+    const riscos = carteiraFinal.reduce(
+      (acc, item) =>
+        acc +
+        item.indicadores.pendenciasVencidas +
+        item.indicadores.impedimentosAbertos +
+        item.indicadores.impedimentosCriticos +
+        item.indicadores.marcosAtrasados +
+        item.indicadores.acoesVencidas,
+      0,
+    );
+
+    // Índice gerencial para comparar concentração antes/depois.
+    const scoreCarga =
+      ativos * 10 +
+      atencao * 12 +
+      criticos * 25 +
+      atrasados * 8 +
+      bloqueados * 15 +
+      riscos * 6;
+
+    const nivel =
+      scoreCarga >= 180
+        ? "Crítica"
+        : scoreCarga >= 100
+          ? "Alta"
+          : scoreCarga >= 55
+            ? "Moderada"
+            : "Disponível";
+
+    return { ativos, atencao, criticos, atrasados, bloqueados, riscos, scoreCarga, nivel };
+  };
+
+
   const top = priorizados.slice(0, 8);
   const scoreMedio = priorizados.length
     ? Math.round(priorizados.reduce((acc, item) => acc + item.score, 0) / priorizados.length)
@@ -225,14 +299,19 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     setCockpit(item);
     setSimPrazo(item.projeto.data_fim ?? "");
     setSimResolverRiscos(false);
+    setSimResponsavelId(item.projeto.responsavel?.id ?? "");
   };
 
   const simulacao = useMemo(() => {
     if (!cockpit) return null;
 
+    const responsavelSimulado =
+      responsaveisDisponiveis.find((item) => item.id === simResponsavelId) ?? null;
+
     const projetoSimulado: Projeto = {
       ...cockpit.projeto,
       data_fim: simPrazo || cockpit.projeto.data_fim,
+      responsavel: responsavelSimulado,
       indicadores: {
         ...cockpit.projeto.indicadores,
         projetoAtrasado: simPrazo
@@ -260,18 +339,146 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     };
 
     return classificar(projetoSimulado);
-  }, [cockpit, simPrazo, simResolverRiscos]);
+  }, [cockpit, simPrazo, simResolverRiscos, simResponsavelId, responsaveisDisponiveis]);
+
+  const impactoRedistribuicao = useMemo(() => {
+    if (!cockpit || !simulacao) return null;
+
+    const origemId = cockpit.projeto.responsavel?.id ?? "";
+    const destinoId = simResponsavelId;
+    if (origemId === destinoId) return null;
+
+    const origemAntes = calcularCargaResponsavel(origemId);
+    const origemDepois = calcularCargaResponsavel(origemId, cockpit.projeto.id);
+
+    const destinoAntes = calcularCargaResponsavel(destinoId);
+    const projetoTransferido: Projeto = {
+      ...cockpit.projeto,
+      responsavel: simulacao.projeto.responsavel,
+      data_fim: simPrazo || cockpit.projeto.data_fim,
+      indicadores: simulacao.projeto.indicadores,
+    };
+    const destinoDepois = calcularCargaResponsavel(
+      destinoId,
+      cockpit.projeto.id,
+      projetoTransferido,
+    );
+
+    const piorouParaCritica =
+      destinoAntes.nivel !== "Crítica" && destinoDepois.nivel === "Crítica";
+    const destinoCritico = destinoDepois.nivel === "Crítica";
+    const destinoAlto = destinoDepois.nivel === "Alta";
+    const aliviaOrigem = origemDepois.scoreCarga < origemAntes.scoreCarga;
+
+    let recomendacao: "Recomendada" | "Avaliar" | "Não recomendada" = "Recomendada";
+    let leitura =
+      "A redistribuição reduz concentração na origem e o destino permanece com capacidade operacional aceitável.";
+
+    if (piorouParaCritica || (destinoCritico && destinoDepois.scoreCarga > origemDepois.scoreCarga)) {
+      recomendacao = "Não recomendada";
+      leitura =
+        "O destino ficaria em carga crítica. Avalie outro responsável antes de aplicar a redistribuição.";
+    } else if (destinoCritico || destinoAlto || !aliviaOrigem) {
+      recomendacao = "Avaliar";
+      leitura =
+        "A transferência é possível, mas o destino ficará com carga elevada ou o ganho de balanceamento será pequeno.";
+    }
+
+    return {
+      origemAntes,
+      origemDepois,
+      destinoAntes,
+      destinoDepois,
+      recomendacao,
+      leitura,
+      origemNome: cockpit.projeto.responsavel?.nome ?? "Sem responsável",
+      destinoNome: simulacao.projeto.responsavel?.nome ?? "Sem responsável",
+    };
+  }, [cockpit, simulacao, simResponsavelId, simPrazo, projetos]);
+
+
+  const aplicarRedistribuicao = useCallback(async () => {
+    if (!cockpit || !simulacao) return;
+
+    const responsavelAnteriorId = cockpit.projeto.responsavel?.id ?? null;
+    const responsavelNovoId = simulacao.projeto.responsavel?.id ?? null;
+
+    if (responsavelAnteriorId === responsavelNovoId) {
+      setErroDecisao("Selecione um responsável diferente para aplicar a redistribuição.");
+      return;
+    }
+
+    const justificativa = justificativaDecisao.trim();
+    if (justificativa.length < 10) {
+      setErroDecisao("Informe uma justificativa com pelo menos 10 caracteres.");
+      return;
+    }
+
+    try {
+      setAplicandoDecisao(true);
+      setErroDecisao("");
+
+      const response = await fetch(
+        `/api/projetos/${cockpit.projeto.id}/decisao-gerencial`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tipo: "redistribuicao",
+            responsavel_anterior_id: responsavelAnteriorId,
+            responsavel_novo_id: responsavelNovoId,
+            justificativa,
+            recomendacao: impactoRedistribuicao?.recomendacao ?? null,
+            score_origem_antes: impactoRedistribuicao?.origemAntes.scoreCarga ?? null,
+            score_origem_depois: impactoRedistribuicao?.origemDepois.scoreCarga ?? null,
+            score_destino_antes: impactoRedistribuicao?.destinoAntes.scoreCarga ?? null,
+            score_destino_depois: impactoRedistribuicao?.destinoDepois.scoreCarga ?? null,
+          }),
+        },
+      );
+
+      const data = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || `Erro HTTP ${response.status}`);
+      }
+
+      setConfirmarDecisao(false);
+      setJustificativaDecisao("");
+      setCockpit(null);
+      await carregar();
+    } catch (e) {
+      setErroDecisao(
+        e instanceof Error ? e.message : "Erro ao aplicar a decisão gerencial.",
+      );
+    } finally {
+      setAplicandoDecisao(false);
+    }
+  }, [
+    cockpit,
+    simulacao,
+    justificativaDecisao,
+    impactoRedistribuicao,
+    carregar,
+  ]);
+
+
 
   const houveMudancaSimulacao =
     !!cockpit &&
     !!simulacao &&
     ((simPrazo || "") !== (cockpit.projeto.data_fim || "") ||
-      simResolverRiscos);
+      simResolverRiscos ||
+      simResponsavelId !== (cockpit.projeto.responsavel?.id ?? ""));
 
   const resetarSimulacao = () => {
     if (!cockpit) return;
     setSimPrazo(cockpit.projeto.data_fim ?? "");
     setSimResolverRiscos(false);
+    setSimResponsavelId(cockpit.projeto.responsavel?.id ?? "");
   };
 
   return (
@@ -609,7 +816,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                   </button>
                 </div>
 
-                <div className="mt-4 grid gap-3 lg:grid-cols-[0.8fr_0.8fr_1.4fr]">
+                <div className="mt-4 grid gap-3 lg:grid-cols-[0.75fr_0.75fr_0.9fr_1.35fr]">
                   <label className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
                     <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-600">
                       Simular novo prazo
@@ -637,6 +844,27 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                       onChange={(e) => setSimResolverRiscos(e.target.checked)}
                       className="h-4 w-4 accent-cyan-400"
                     />
+                  </label>
+
+                  <label className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                    <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      Simular responsável
+                    </div>
+                    <select
+                      value={simResponsavelId}
+                      onChange={(e) => setSimResponsavelId(e.target.value)}
+                      className="mt-2 w-full rounded-lg border border-white/[0.08] bg-[#090f26] px-3 py-2 text-xs text-white outline-none focus:border-sky-400/40"
+                    >
+                      <option value="">Sem responsável</option>
+                      {responsaveisDisponiveis.map((responsavel) => (
+                        <option key={responsavel.id} value={responsavel.id}>
+                          {responsavel.nome}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="mt-2 text-[8px] leading-4 text-slate-600">
+                      Simulação local. Não redistribui o projeto no banco.
+                    </div>
                   </label>
 
                   <div className="rounded-xl border border-sky-400/10 bg-sky-400/[0.035] p-3">
@@ -684,18 +912,129 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                         </div>
                       </div>
                     )}
+                    {simulacao &&
+                      simResponsavelId !== (cockpit.projeto.responsavel?.id ?? "") && (
+                        <div className="mt-3 rounded-lg border border-violet-400/15 bg-violet-400/[0.04] px-2.5 py-2 text-[8px] leading-4 text-violet-200">
+                          Redistribuição simulada:{" "}
+                          <span className="font-semibold">
+                            {cockpit.projeto.responsavel?.nome ?? "Sem responsável"}
+                          </span>{" "}
+                          →{" "}
+                          <span className="font-semibold">
+                            {simulacao.projeto.responsavel?.nome ?? "Sem responsável"}
+                          </span>
+                        </div>
+                      )}
                   </div>
                 </div>
+
+                {impactoRedistribuicao && (
+                  <div className="mt-4 rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.025] p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
+                          Impacto da redistribuição
+                        </div>
+                        <div className="mt-1 text-[9px] text-slate-500">
+                          Comparação da concentração operacional antes e depois da transferência simulada.
+                        </div>
+                      </div>
+                      <span
+                        className={`inline-flex w-fit rounded-full border px-3 py-1 text-[9px] font-semibold ${
+                          impactoRedistribuicao.recomendacao === "Recomendada"
+                            ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                            : impactoRedistribuicao.recomendacao === "Não recomendada"
+                              ? "border-red-400/30 bg-red-400/10 text-red-300"
+                              : "border-amber-400/30 bg-amber-400/10 text-amber-300"
+                        }`}
+                      >
+                        {impactoRedistribuicao.recomendacao}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                      {[
+                        {
+                          titulo: `ORIGEM • ${impactoRedistribuicao.origemNome}`,
+                          antes: impactoRedistribuicao.origemAntes,
+                          depois: impactoRedistribuicao.origemDepois,
+                        },
+                        {
+                          titulo: `DESTINO • ${impactoRedistribuicao.destinoNome}`,
+                          antes: impactoRedistribuicao.destinoAntes,
+                          depois: impactoRedistribuicao.destinoDepois,
+                        },
+                      ].map((bloco) => (
+                        <div
+                          key={bloco.titulo}
+                          className="rounded-xl border border-white/[0.06] bg-black/20 p-3"
+                        >
+                          <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                            {bloco.titulo}
+                          </div>
+                          <div className="mt-3 grid grid-cols-3 gap-2">
+                            <div>
+                              <div className="text-[8px] uppercase text-slate-600">Projetos</div>
+                              <div className="mt-1 text-sm font-semibold text-white">
+                                {bloco.antes.ativos} <span className="text-slate-600">→</span>{" "}
+                                {bloco.depois.ativos}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[8px] uppercase text-slate-600">Riscos</div>
+                              <div className="mt-1 text-sm font-semibold text-white">
+                                {bloco.antes.riscos} <span className="text-slate-600">→</span>{" "}
+                                {bloco.depois.riscos}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[8px] uppercase text-slate-600">Score carga</div>
+                              <div className="mt-1 text-sm font-semibold text-white">
+                                {bloco.antes.scoreCarga} <span className="text-slate-600">→</span>{" "}
+                                {bloco.depois.scoreCarga}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-3 flex items-center justify-between rounded-lg border border-white/[0.05] bg-white/[0.025] px-2.5 py-2">
+                            <span className="text-[8px] uppercase text-slate-600">Carga</span>
+                            <span className="text-[9px] font-semibold text-slate-300">
+                              {bloco.antes.nivel} → {bloco.depois.nivel}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div
+                      className={`mt-3 rounded-xl border px-3 py-3 text-[9px] leading-4 ${
+                        impactoRedistribuicao.recomendacao === "Recomendada"
+                          ? "border-emerald-400/15 bg-emerald-400/[0.04] text-emerald-200"
+                          : impactoRedistribuicao.recomendacao === "Não recomendada"
+                            ? "border-red-400/15 bg-red-400/[0.04] text-red-200"
+                            : "border-amber-400/15 bg-amber-400/[0.04] text-amber-200"
+                      }`}
+                    >
+                      <span className="font-semibold">Leitura gerencial: </span>
+                      {impactoRedistribuicao.leitura}
+                    </div>
+                  </div>
+                )}
 
                 {simulacao && houveMudancaSimulacao && (
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <div className="rounded-xl border border-white/[0.05] bg-black/15 px-3 py-2 text-[9px] text-slate-500">
                       <span className="font-semibold text-slate-300">Cenário atual:</span>{" "}
                       {cockpit.motivos.slice(0, 4).join(" • ")}
+                      <div className="mt-1 text-slate-600">
+                        Responsável: {cockpit.projeto.responsavel?.nome ?? "Sem responsável"}
+                      </div>
                     </div>
                     <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.025] px-3 py-2 text-[9px] text-slate-500">
                       <span className="font-semibold text-emerald-300">Cenário simulado:</span>{" "}
                       {simulacao.motivos.slice(0, 4).join(" • ")}
+                      <div className="mt-1 text-emerald-300/70">
+                        Responsável: {simulacao.projeto.responsavel?.nome ?? "Sem responsável"}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -707,23 +1046,150 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
               </div>
             </div>
 
-            <div className="flex items-center justify-between border-t border-white/[0.06] bg-[#080c20] px-5 py-3">
+            <div className="flex items-center justify-between gap-3 border-t border-white/[0.06] bg-[#080c20] px-5 py-3">
               <div className="text-[9px] text-slate-600">
-                Nenhuma decisão é aplicada automaticamente.
+                A aplicação exige confirmação e justificativa e será registrada no histórico.
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const id = cockpit.projeto.id;
-                  setCockpit(null);
-                  onOpenProjeto?.(id);
-                }}
-                className="rounded-xl border border-sky-400/30 bg-sky-400/[0.09] px-4 py-2 text-xs font-semibold text-sky-200 hover:bg-sky-400/[0.15]"
-              >
-                Abrir Projeto 360
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={
+                    !simulacao ||
+                    simResponsavelId === (cockpit.projeto.responsavel?.id ?? "")
+                  }
+                  onClick={() => {
+                    setErroDecisao("");
+                    setConfirmarDecisao(true);
+                  }}
+                  className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.09] px-4 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-400/[0.15] disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  Aplicar decisão
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = cockpit.projeto.id;
+                    setCockpit(null);
+                    onOpenProjeto?.(id);
+                  }}
+                  className="rounded-xl border border-sky-400/30 bg-sky-400/[0.09] px-4 py-2 text-xs font-semibold text-sky-200 hover:bg-sky-400/[0.15]"
+                >
+                  Abrir Projeto 360
+                </button>
+              </div>
             </div>
           </div>
+
+          {confirmarDecisao && simulacao && (
+            <div className="absolute inset-0 z-[120] flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm">
+              <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-emerald-400/20 bg-[#0a1028] shadow-2xl shadow-black/60">
+                <div className="border-b border-white/[0.06] px-5 py-4">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300">
+                    Confirmar decisão gerencial
+                  </div>
+                  <h4 className="mt-1 text-lg font-semibold text-white">
+                    Redistribuir {cockpit.projeto.nome}
+                  </h4>
+                  <div className="mt-1 text-[10px] text-slate-500">
+                    Esta ação altera o responsável real do projeto e cria registro de auditoria.
+                  </div>
+                </div>
+
+                <div className="space-y-4 p-5">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                      <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">
+                        Responsável atual
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-white">
+                        {cockpit.projeto.responsavel?.nome ?? "Sem responsável"}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-3">
+                      <div className="text-[8px] uppercase tracking-[0.12em] text-emerald-400/60">
+                        Novo responsável
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-emerald-200">
+                        {simulacao.projeto.responsavel?.nome ?? "Sem responsável"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {impactoRedistribuicao && (
+                    <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3 text-[10px] text-slate-400">
+                      <div className="flex items-center justify-between gap-3">
+                        <span>Recomendação do cockpit</span>
+                        <span className="font-semibold text-white">
+                          {impactoRedistribuicao.recomendacao}
+                        </span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-3">
+                        <div>
+                          Carlos/origem:{" "}
+                          <span className="font-semibold text-slate-200">
+                            {impactoRedistribuicao.origemAntes.ativos} →{" "}
+                            {impactoRedistribuicao.origemDepois.ativos} projetos
+                          </span>
+                        </div>
+                        <div>
+                          Destino:{" "}
+                          <span className="font-semibold text-slate-200">
+                            {impactoRedistribuicao.destinoAntes.ativos} →{" "}
+                            {impactoRedistribuicao.destinoDepois.ativos} projetos
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <label className="block">
+                    <div className="mb-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                      Justificativa obrigatória
+                    </div>
+                    <textarea
+                      value={justificativaDecisao}
+                      onChange={(e) => setJustificativaDecisao(e.target.value)}
+                      rows={4}
+                      maxLength={500}
+                      placeholder="Ex.: Redistribuição aprovada para reduzir concentração operacional de Carlos e utilizar capacidade disponível de Weverton."
+                      className="w-full resize-none rounded-xl border border-white/[0.08] bg-[#080d20] px-3 py-3 text-xs text-white outline-none placeholder:text-slate-700 focus:border-emerald-400/35"
+                    />
+                    <div className="mt-1 text-right text-[8px] text-slate-600">
+                      {justificativaDecisao.length}/500
+                    </div>
+                  </label>
+
+                  {erroDecisao && (
+                    <div className="rounded-xl border border-red-400/20 bg-red-400/[0.06] px-3 py-2 text-[10px] text-red-300">
+                      {erroDecisao}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 border-t border-white/[0.06] px-5 py-4">
+                  <button
+                    type="button"
+                    disabled={aplicandoDecisao}
+                    onClick={() => {
+                      setConfirmarDecisao(false);
+                      setErroDecisao("");
+                    }}
+                    className="rounded-xl border border-white/[0.08] bg-white/[0.035] px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/[0.07] disabled:opacity-40"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={aplicandoDecisao || justificativaDecisao.trim().length < 10}
+                    onClick={aplicarRedistribuicao}
+                    className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.12] px-4 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-400/[0.18] disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    {aplicandoDecisao ? "Aplicando..." : "Confirmar e aplicar"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </section>

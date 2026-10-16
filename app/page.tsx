@@ -320,15 +320,53 @@ export default function Home() {
   }, []);
 
   const openProjeto360ById = useCallback(
-    (projetoId: string) => {
-      const projeto = projetos.find((item) => item.id === projetoId);
+    async (projetoId: string) => {
+      try {
+        const response = await fetch("/api/projetos", {
+          cache: "no-store",
+        });
 
-      if (!projeto) {
-        console.warn(`[Control Tower] Projeto ${projetoId} não encontrado na carteira.`);
-        return;
+        if (!response.ok) {
+          throw new Error(`Erro HTTP ${response.status}`);
+        }
+
+        const data = (await response.json()) as ApiResponse;
+
+        if (!data.success) {
+          throw new Error("A API não retornou sucesso.");
+        }
+
+        const projetosAtualizados = data.projetos ?? [];
+
+        setProjetos(projetosAtualizados);
+        setResumo(data.resumo ?? null);
+
+        const projetoAtualizado = projetosAtualizados.find(
+          (item) => item.id === projetoId,
+        );
+
+        if (!projetoAtualizado) {
+          console.warn(
+            `[Control Tower] Projeto ${projetoId} não encontrado na carteira.`,
+          );
+          return;
+        }
+
+        openProjeto360(projetoAtualizado);
+      } catch (error) {
+        console.error(
+          "[Control Tower] Erro ao atualizar projeto antes de abrir o Projeto 360:",
+          error,
+        );
+
+        const projetoLocal = projetos.find(
+          (item) => item.id === projetoId,
+        );
+
+        if (projetoLocal) {
+          openProjeto360(projetoLocal);
+        }
       }
-
-      openProjeto360(projeto);
     },
     [projetos, openProjeto360],
   );
@@ -365,8 +403,33 @@ export default function Home() {
         throw new Error("A API não retornou sucesso.");
       }
 
-      setProjetos(data.projetos ?? []);
+      const projetosAtualizados = data.projetos ?? [];
+
+      setProjetos(projetosAtualizados);
       setResumo(data.resumo ?? null);
+
+      // Mantém modais sincronizados com o registro mais recente do banco.
+      // Isso evita que prazo, prioridade ou responsável antigos continuem
+      // aparecendo no Projeto 360 depois de uma decisão gerencial.
+      setProjeto360((atual) => {
+        if (!atual) return atual;
+
+        return (
+          projetosAtualizados.find(
+            (item) => item.id === atual.id,
+          ) ?? atual
+        );
+      });
+
+      setSelectedProjeto((atual) => {
+        if (!atual) return atual;
+
+        return (
+          projetosAtualizados.find(
+            (item) => item.id === atual.id,
+          ) ?? atual
+        );
+      });
     } catch (err) {
       console.error(err);
 

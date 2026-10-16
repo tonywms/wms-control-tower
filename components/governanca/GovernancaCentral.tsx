@@ -19,6 +19,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import CapacidadeEquipe from "./CapacidadeEquipe";
 import MatrizPriorizacao from "./MatrizPriorizacao";
+import CentralDecisoes from "./CentralDecisoes";
 
 type ProjetoRisco = {
   id: string;
@@ -346,6 +347,10 @@ export default function GovernancaCentral({ onOpenProjeto }: Props) {
       <div className="my-8 h-px bg-gradient-to-r from-transparent via-violet-400/20 to-transparent" />
 
       <MatrizPriorizacao onOpenProjeto={onOpenProjeto} />
+
+      <div className="my-8 h-px bg-gradient-to-r from-transparent via-fuchsia-400/20 to-transparent" />
+
+      <CentralDecisoes onOpenProjeto={onOpenProjeto} />
 
       {drilldown && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) setDrilldown(null); }}>

@@ -173,9 +173,11 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
   const [error, setError] = useState("");
   const [cockpit, setCockpit] = useState<ProjetoPriorizado | null>(null);
   const [simPrazo, setSimPrazo] = useState("");
+  const [simPrioridade, setSimPrioridade] = useState("");
   const [simResolverRiscos, setSimResolverRiscos] = useState(false);
   const [simResponsavelId, setSimResponsavelId] = useState("");
   const [confirmarDecisao, setConfirmarDecisao] = useState(false);
+  const [tipoDecisaoConfirmacao, setTipoDecisaoConfirmacao] = useState<"redistribuicao" | "reprogramacao_prazo" | "alteracao_prioridade" | null>(null);
   const [justificativaDecisao, setJustificativaDecisao] = useState("");
   const [aplicandoDecisao, setAplicandoDecisao] = useState(false);
   const [erroDecisao, setErroDecisao] = useState("");
@@ -298,6 +300,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
   const abrirCockpit = (item: ProjetoPriorizado) => {
     setCockpit(item);
     setSimPrazo(item.projeto.data_fim ?? "");
+    setSimPrioridade(item.projeto.prioridade);
     setSimResolverRiscos(false);
     setSimResponsavelId(item.projeto.responsavel?.id ?? "");
   };
@@ -311,6 +314,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     const projetoSimulado: Projeto = {
       ...cockpit.projeto,
       data_fim: simPrazo || cockpit.projeto.data_fim,
+      prioridade: simPrioridade || cockpit.projeto.prioridade,
       responsavel: responsavelSimulado,
       indicadores: {
         ...cockpit.projeto.indicadores,
@@ -339,7 +343,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     };
 
     return classificar(projetoSimulado);
-  }, [cockpit, simPrazo, simResolverRiscos, simResponsavelId, responsaveisDisponiveis]);
+  }, [cockpit, simPrazo, simPrioridade, simResolverRiscos, simResponsavelId, responsaveisDisponiveis]);
 
   const impactoRedistribuicao = useMemo(() => {
     if (!cockpit || !simulacao) return null;
@@ -447,6 +451,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
       }
 
       setConfirmarDecisao(false);
+      setTipoDecisaoConfirmacao(null);
       setJustificativaDecisao("");
       setCockpit(null);
       await carregar();
@@ -467,16 +472,168 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
 
 
 
+  const aplicarReprogramacaoPrazo = useCallback(async () => {
+    if (!cockpit || !simulacao) return;
+
+    const prazoAnterior = cockpit.projeto.data_fim ?? null;
+    const prazoNovo = simPrazo || null;
+
+    if (!prazoNovo || prazoNovo === prazoAnterior) {
+      setErroDecisao("Informe um novo prazo diferente do prazo atual.");
+      return;
+    }
+
+    const justificativa = justificativaDecisao.trim();
+
+    if (justificativa.length < 10) {
+      setErroDecisao("Informe uma justificativa com pelo menos 10 caracteres.");
+      return;
+    }
+
+    try {
+      setAplicandoDecisao(true);
+      setErroDecisao("");
+
+      const response = await fetch(
+        `/api/projetos/${cockpit.projeto.id}/decisao-gerencial`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tipo: "reprogramacao_prazo",
+            prazo_anterior: prazoAnterior,
+            prazo_novo: prazoNovo,
+            justificativa,
+            score_anterior: cockpit.score,
+            score_novo: simulacao.score,
+            urgencia_anterior: cockpit.urgencia,
+            urgencia_nova: simulacao.urgencia,
+            quadrante_anterior: cockpit.quadrante,
+            quadrante_novo: simulacao.quadrante,
+          }),
+        },
+      );
+
+      const data = (await response.json()) as {
+        success?: boolean;
+        applied?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || `Erro HTTP ${response.status}`);
+      }
+
+      setConfirmarDecisao(false);
+      setTipoDecisaoConfirmacao(null);
+      setJustificativaDecisao("");
+      setCockpit(null);
+      await carregar();
+    } catch (e) {
+      setErroDecisao(
+        e instanceof Error
+          ? e.message
+          : "Erro ao aplicar a reprogramação de prazo.",
+      );
+    } finally {
+      setAplicandoDecisao(false);
+    }
+  }, [
+    cockpit,
+    simulacao,
+    simPrazo,
+    justificativaDecisao,
+    carregar,
+  ]);
+
+
+  const aplicarAlteracaoPrioridade = useCallback(async () => {
+    if (!cockpit || !simulacao) return;
+
+    const prioridadeAnterior = cockpit.projeto.prioridade;
+    const prioridadeNova = simPrioridade;
+
+    if (!prioridadeNova || prioridadeNova === prioridadeAnterior) {
+      setErroDecisao("Selecione uma prioridade diferente da prioridade atual.");
+      return;
+    }
+
+    const justificativa = justificativaDecisao.trim();
+
+    if (justificativa.length < 10) {
+      setErroDecisao("Informe uma justificativa com pelo menos 10 caracteres.");
+      return;
+    }
+
+    try {
+      setAplicandoDecisao(true);
+      setErroDecisao("");
+
+      const response = await fetch(
+        `/api/projetos/${cockpit.projeto.id}/decisao-gerencial`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tipo: "alteracao_prioridade",
+            prioridade_anterior: prioridadeAnterior,
+            prioridade_nova: prioridadeNova,
+            justificativa,
+            score_anterior: cockpit.score,
+            score_novo: simulacao.score,
+            urgencia_anterior: cockpit.urgencia,
+            urgencia_nova: simulacao.urgencia,
+            quadrante_anterior: cockpit.quadrante,
+            quadrante_novo: simulacao.quadrante,
+          }),
+        },
+      );
+
+      const data = (await response.json()) as {
+        success?: boolean;
+        applied?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || `Erro HTTP ${response.status}`);
+      }
+
+      setConfirmarDecisao(false);
+      setTipoDecisaoConfirmacao(null);
+      setJustificativaDecisao("");
+      setCockpit(null);
+      await carregar();
+    } catch (e) {
+      setErroDecisao(
+        e instanceof Error
+          ? e.message
+          : "Erro ao aplicar a alteração de prioridade.",
+      );
+    } finally {
+      setAplicandoDecisao(false);
+    }
+  }, [
+    cockpit,
+    simulacao,
+    simPrioridade,
+    justificativaDecisao,
+    carregar,
+  ]);
+
+
   const houveMudancaSimulacao =
     !!cockpit &&
     !!simulacao &&
     ((simPrazo || "") !== (cockpit.projeto.data_fim || "") ||
+      simPrioridade !== cockpit.projeto.prioridade ||
       simResolverRiscos ||
       simResponsavelId !== (cockpit.projeto.responsavel?.id ?? ""));
 
   const resetarSimulacao = () => {
     if (!cockpit) return;
     setSimPrazo(cockpit.projeto.data_fim ?? "");
+    setSimPrioridade(cockpit.projeto.prioridade);
     setSimResolverRiscos(false);
     setSimResponsavelId(cockpit.projeto.responsavel?.id ?? "");
   };
@@ -816,7 +973,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                   </button>
                 </div>
 
-                <div className="mt-4 grid gap-3 lg:grid-cols-[0.75fr_0.75fr_0.9fr_1.35fr]">
+                <div className="mt-4 grid gap-3 lg:grid-cols-[0.72fr_0.72fr_0.72fr_0.9fr_1.35fr]">
                   <label className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
                     <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-600">
                       Simular novo prazo
@@ -827,6 +984,22 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                       onChange={(e) => setSimPrazo(e.target.value)}
                       className="mt-2 w-full rounded-lg border border-white/[0.08] bg-[#090f26] px-3 py-2 text-xs text-white outline-none focus:border-sky-400/40"
                     />
+                  </label>
+
+                  <label className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                    <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      Simular prioridade
+                    </div>
+                    <select
+                      value={simPrioridade}
+                      onChange={(e) => setSimPrioridade(e.target.value)}
+                      className="mt-2 w-full rounded-lg border border-white/[0.08] bg-[#090f26] px-3 py-2 text-xs text-white outline-none focus:border-sky-400/40"
+                    >
+                      <option value="Baixa">Baixa</option>
+                      <option value="Normal">Normal</option>
+                      <option value="Alta">Alta</option>
+                      <option value="Crítica">Crítica</option>
+                    </select>
                   </label>
 
                   <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-black/20 p-3">
@@ -1055,15 +1228,53 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                   type="button"
                   disabled={
                     !simulacao ||
+                    !simPrioridade ||
+                    simPrioridade === cockpit.projeto.prioridade
+                  }
+                  onClick={() => {
+                    setErroDecisao("");
+                    setJustificativaDecisao("");
+                    setTipoDecisaoConfirmacao("alteracao_prioridade");
+                    setConfirmarDecisao(true);
+                  }}
+                  className="rounded-xl border border-violet-400/30 bg-violet-400/[0.09] px-4 py-2 text-xs font-semibold text-violet-200 hover:bg-violet-400/[0.15] disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  Aplicar prioridade
+                </button>
+
+                <button
+                  type="button"
+                  disabled={
+                    !simulacao ||
+                    !simPrazo ||
+                    simPrazo === (cockpit.projeto.data_fim ?? "")
+                  }
+                  onClick={() => {
+                    setErroDecisao("");
+                    setJustificativaDecisao("");
+                    setTipoDecisaoConfirmacao("reprogramacao_prazo");
+                    setConfirmarDecisao(true);
+                  }}
+                  className="rounded-xl border border-amber-400/30 bg-amber-400/[0.09] px-4 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-400/[0.15] disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  Aplicar novo prazo
+                </button>
+
+                <button
+                  type="button"
+                  disabled={
+                    !simulacao ||
                     simResponsavelId === (cockpit.projeto.responsavel?.id ?? "")
                   }
                   onClick={() => {
                     setErroDecisao("");
+                    setJustificativaDecisao("");
+                    setTipoDecisaoConfirmacao("redistribuicao");
                     setConfirmarDecisao(true);
                   }}
                   className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.09] px-4 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-400/[0.15] disabled:cursor-not-allowed disabled:opacity-30"
                 >
-                  Aplicar decisão
+                  Aplicar redistribuição
                 </button>
                 <button
                   type="button"
@@ -1088,34 +1299,142 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                     Confirmar decisão gerencial
                   </div>
                   <h4 className="mt-1 text-lg font-semibold text-white">
-                    Redistribuir {cockpit.projeto.nome}
+                    {tipoDecisaoConfirmacao === "reprogramacao_prazo"
+                      ? `Reprogramar prazo de ${cockpit.projeto.nome}`
+                      : tipoDecisaoConfirmacao === "alteracao_prioridade"
+                        ? `Alterar prioridade de ${cockpit.projeto.nome}`
+                        : `Redistribuir ${cockpit.projeto.nome}`}
                   </h4>
                   <div className="mt-1 text-[10px] text-slate-500">
-                    Esta ação altera o responsável real do projeto e cria registro de auditoria.
+                    {tipoDecisaoConfirmacao === "reprogramacao_prazo"
+                      ? "Esta ação altera a data final real do projeto e cria registro de auditoria."
+                      : tipoDecisaoConfirmacao === "alteracao_prioridade"
+                        ? "Esta ação altera a prioridade real do projeto e cria registro de auditoria."
+                        : "Esta ação altera o responsável real do projeto e cria registro de auditoria."}
                   </div>
                 </div>
 
                 <div className="space-y-4 p-5">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
-                      <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">
-                        Responsável atual
+                  {tipoDecisaoConfirmacao === "reprogramacao_prazo" ? (
+                    <>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                          <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">
+                            Prazo atual
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-white">
+                            {cockpit.projeto.data_fim
+                              ? new Intl.DateTimeFormat("pt-BR").format(
+                                  new Date(`${cockpit.projeto.data_fim}T12:00:00`),
+                                )
+                              : "Sem prazo"}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-3">
+                          <div className="text-[8px] uppercase tracking-[0.12em] text-amber-400/60">
+                            Novo prazo
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-amber-200">
+                            {simPrazo
+                              ? new Intl.DateTimeFormat("pt-BR").format(
+                                  new Date(`${simPrazo}T12:00:00`),
+                                )
+                              : "Não informado"}
+                          </div>
+                        </div>
                       </div>
-                      <div className="mt-1 text-sm font-semibold text-white">
-                        {cockpit.projeto.responsavel?.nome ?? "Sem responsável"}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-3">
-                      <div className="text-[8px] uppercase tracking-[0.12em] text-emerald-400/60">
-                        Novo responsável
-                      </div>
-                      <div className="mt-1 text-sm font-semibold text-emerald-200">
-                        {simulacao.projeto.responsavel?.nome ?? "Sem responsável"}
-                      </div>
-                    </div>
-                  </div>
 
-                  {impactoRedistribuicao && (
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                          <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">
+                            Score
+                          </div>
+                          <div className="mt-1 text-xs font-semibold text-white">
+                            {cockpit.score} → {simulacao.score}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                          <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">
+                            Urgência
+                          </div>
+                          <div className="mt-1 text-xs font-semibold text-white">
+                            {cockpit.urgencia} → {simulacao.urgencia}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                          <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">
+                            Quadrante
+                          </div>
+                          <div className="mt-1 text-xs font-semibold text-white">
+                            {cockpit.quadrante} → {simulacao.quadrante}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : tipoDecisaoConfirmacao === "alteracao_prioridade" ? (
+                    <>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                          <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">
+                            Prioridade atual
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-white">
+                            {cockpit.projeto.prioridade}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-violet-400/15 bg-violet-400/[0.04] p-3">
+                          <div className="text-[8px] uppercase tracking-[0.12em] text-violet-400/60">
+                            Nova prioridade
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-violet-200">
+                            {simPrioridade}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                          <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">Score</div>
+                          <div className="mt-1 text-xs font-semibold text-white">
+                            {cockpit.score} → {simulacao.score}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                          <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">Urgência</div>
+                          <div className="mt-1 text-xs font-semibold text-white">
+                            {cockpit.urgencia} → {simulacao.urgencia}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                          <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">Quadrante</div>
+                          <div className="mt-1 text-xs font-semibold text-white">
+                            {cockpit.quadrante} → {simulacao.quadrante}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                        <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">
+                          Responsável atual
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-white">
+                          {cockpit.projeto.responsavel?.nome ?? "Sem responsável"}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-3">
+                        <div className="text-[8px] uppercase tracking-[0.12em] text-emerald-400/60">
+                          Novo responsável
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-emerald-200">
+                          {simulacao.projeto.responsavel?.nome ?? "Sem responsável"}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {tipoDecisaoConfirmacao === "redistribuicao" && impactoRedistribuicao && (
                     <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3 text-[10px] text-slate-400">
                       <div className="flex items-center justify-between gap-3">
                         <span>Recomendação do cockpit</span>
@@ -1151,7 +1470,13 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                       onChange={(e) => setJustificativaDecisao(e.target.value)}
                       rows={4}
                       maxLength={500}
-                      placeholder="Ex.: Redistribuição aprovada para reduzir concentração operacional de Carlos e utilizar capacidade disponível de Weverton."
+                      placeholder={
+                      tipoDecisaoConfirmacao === "reprogramacao_prazo"
+                        ? "Ex.: Cliente solicitou nova data para conclusão e o prazo foi replanejado com o time."
+                        : tipoDecisaoConfirmacao === "alteracao_prioridade"
+                          ? "Ex.: Projeto elevado para prioridade crítica devido ao impacto operacional no cliente."
+                          : "Ex.: Redistribuição aprovada para reduzir concentração operacional e utilizar capacidade disponível."
+                    }
                       className="w-full resize-none rounded-xl border border-white/[0.08] bg-[#080d20] px-3 py-3 text-xs text-white outline-none placeholder:text-slate-700 focus:border-emerald-400/35"
                     />
                     <div className="mt-1 text-right text-[8px] text-slate-600">
@@ -1172,6 +1497,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                     disabled={aplicandoDecisao}
                     onClick={() => {
                       setConfirmarDecisao(false);
+                      setTipoDecisaoConfirmacao(null);
                       setErroDecisao("");
                     }}
                     className="rounded-xl border border-white/[0.08] bg-white/[0.035] px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/[0.07] disabled:opacity-40"
@@ -1181,7 +1507,13 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                   <button
                     type="button"
                     disabled={aplicandoDecisao || justificativaDecisao.trim().length < 10}
-                    onClick={aplicarRedistribuicao}
+                    onClick={
+                      tipoDecisaoConfirmacao === "reprogramacao_prazo"
+                        ? aplicarReprogramacaoPrazo
+                        : tipoDecisaoConfirmacao === "alteracao_prioridade"
+                          ? aplicarAlteracaoPrioridade
+                          : aplicarRedistribuicao
+                    }
                     className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.12] px-4 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-400/[0.18] disabled:cursor-not-allowed disabled:opacity-35"
                   >
                     {aplicandoDecisao ? "Aplicando..." : "Confirmar e aplicar"}

@@ -44,6 +44,7 @@ type Props = {
 };
 
 type Quadrante = "Agir agora" | "Proteger" | "Planejar" | "Monitorar";
+type StatusGerencial = "Pausado" | "Bloqueado" | "Em andamento";
 
 type ProjetoPriorizado = {
   projeto: Projeto;
@@ -177,10 +178,12 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
   const [simResolverRiscos, setSimResolverRiscos] = useState(false);
   const [simResponsavelId, setSimResponsavelId] = useState("");
   const [confirmarDecisao, setConfirmarDecisao] = useState(false);
-  const [tipoDecisaoConfirmacao, setTipoDecisaoConfirmacao] = useState<"redistribuicao" | "reprogramacao_prazo" | "alteracao_prioridade" | null>(null);
+  const [tipoDecisaoConfirmacao, setTipoDecisaoConfirmacao] = useState<"redistribuicao" | "reprogramacao_prazo" | "alteracao_prioridade" | "alteracao_status" | null>(null);
   const [justificativaDecisao, setJustificativaDecisao] = useState("");
   const [aplicandoDecisao, setAplicandoDecisao] = useState(false);
   const [erroDecisao, setErroDecisao] = useState("");
+  const [statusNovoGerencial, setStatusNovoGerencial] = useState<StatusGerencial | null>(null);
+  const [sucessoDecisao, setSucessoDecisao] = useState("");
 
   const carregar = useCallback(async () => {
     try {
@@ -191,9 +194,12 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
       if (!response.ok || !data.success) {
         throw new Error(data.error || `Erro HTTP ${response.status}`);
       }
-      setProjetos(data.projetos ?? []);
+      const projetosAtualizados = data.projetos ?? [];
+      setProjetos(projetosAtualizados);
+      return projetosAtualizados;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao carregar priorização.");
+      return [];
     } finally {
       setLoading(false);
     }
@@ -202,6 +208,37 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
   useEffect(() => {
     carregar();
   }, [carregar]);
+
+  useEffect(() => {
+    function abrirCockpitExterno(event: Event) {
+      const customEvent = event as CustomEvent<{
+        projetoId?: string;
+      }>;
+
+      const projetoId = customEvent.detail?.projetoId;
+      if (!projetoId) return;
+
+      const projeto = projetos.find(
+        (item) => item.id === projetoId,
+      );
+
+      if (!projeto || encerrados.has(projeto.status)) return;
+
+      abrirCockpit(classificar(projeto));
+    }
+
+    window.addEventListener(
+      "control-tower:open-cockpit",
+      abrirCockpitExterno,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "control-tower:open-cockpit",
+        abrirCockpitExterno,
+      );
+    };
+  }, [projetos]);
 
   const priorizados = useMemo(
     () =>
@@ -298,12 +335,38 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     : 0;
 
   const abrirCockpit = (item: ProjetoPriorizado) => {
+    setSucessoDecisao("");
     setCockpit(item);
     setSimPrazo(item.projeto.data_fim ?? "");
     setSimPrioridade(item.projeto.prioridade);
     setSimResolverRiscos(false);
     setSimResponsavelId(item.projeto.responsavel?.id ?? "");
   };
+
+  const sincronizarCockpitAposDecisao = useCallback(
+    async (projetoId: string, mensagem: string) => {
+      const projetosAtualizados = await carregar();
+      const projetoAtualizado = projetosAtualizados.find(
+        (item) => item.id === projetoId,
+      );
+
+      if (!projetoAtualizado) {
+        setCockpit(null);
+        setSucessoDecisao(mensagem);
+        return;
+      }
+
+      const classificado = classificar(projetoAtualizado);
+
+      setCockpit(classificado);
+      setSimPrazo(projetoAtualizado.data_fim ?? "");
+      setSimPrioridade(projetoAtualizado.prioridade);
+      setSimResolverRiscos(false);
+      setSimResponsavelId(projetoAtualizado.responsavel?.id ?? "");
+      setSucessoDecisao(mensagem);
+    },
+    [carregar],
+  );
 
   const simulacao = useMemo(() => {
     if (!cockpit) return null;
@@ -450,11 +513,17 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
         throw new Error(data.error || `Erro HTTP ${response.status}`);
       }
 
+      const projetoId = cockpit.projeto.id;
+      const projetoNome = cockpit.projeto.nome;
+
       setConfirmarDecisao(false);
       setTipoDecisaoConfirmacao(null);
       setJustificativaDecisao("");
-      setCockpit(null);
-      await carregar();
+
+      await sincronizarCockpitAposDecisao(
+        projetoId,
+        `Redistribuição aplicada com sucesso em ${projetoNome}.`,
+      );
     } catch (e) {
       setErroDecisao(
         e instanceof Error ? e.message : "Erro ao aplicar a decisão gerencial.",
@@ -467,7 +536,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     simulacao,
     justificativaDecisao,
     impactoRedistribuicao,
-    carregar,
+    sincronizarCockpitAposDecisao,
   ]);
 
 
@@ -524,11 +593,17 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
         throw new Error(data.error || `Erro HTTP ${response.status}`);
       }
 
+      const projetoId = cockpit.projeto.id;
+      const projetoNome = cockpit.projeto.nome;
+
       setConfirmarDecisao(false);
       setTipoDecisaoConfirmacao(null);
       setJustificativaDecisao("");
-      setCockpit(null);
-      await carregar();
+
+      await sincronizarCockpitAposDecisao(
+        projetoId,
+        `Novo prazo aplicado com sucesso em ${projetoNome}.`,
+      );
     } catch (e) {
       setErroDecisao(
         e instanceof Error
@@ -543,7 +618,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     simulacao,
     simPrazo,
     justificativaDecisao,
-    carregar,
+    sincronizarCockpitAposDecisao,
   ]);
 
 
@@ -599,11 +674,17 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
         throw new Error(data.error || `Erro HTTP ${response.status}`);
       }
 
+      const projetoId = cockpit.projeto.id;
+      const projetoNome = cockpit.projeto.nome;
+
       setConfirmarDecisao(false);
       setTipoDecisaoConfirmacao(null);
       setJustificativaDecisao("");
-      setCockpit(null);
-      await carregar();
+
+      await sincronizarCockpitAposDecisao(
+        projetoId,
+        `Prioridade atualizada com sucesso em ${projetoNome}.`,
+      );
     } catch (e) {
       setErroDecisao(
         e instanceof Error
@@ -618,9 +699,85 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     simulacao,
     simPrioridade,
     justificativaDecisao,
-    carregar,
+    sincronizarCockpitAposDecisao,
   ]);
 
+
+  const aplicarAlteracaoStatus = useCallback(async () => {
+    if (!cockpit || !statusNovoGerencial) return;
+
+    const statusAnterior = cockpit.projeto.status;
+    if (statusAnterior === statusNovoGerencial) {
+      setErroDecisao("O novo status deve ser diferente do status atual.");
+      return;
+    }
+
+    const justificativa = justificativaDecisao.trim();
+    if (justificativa.length < 10) {
+      setErroDecisao("Informe uma justificativa com pelo menos 10 caracteres.");
+      return;
+    }
+
+    const classificacaoNova = classificar({
+      ...cockpit.projeto,
+      status: statusNovoGerencial,
+    });
+
+    try {
+      setAplicandoDecisao(true);
+      setErroDecisao("");
+
+      const response = await fetch(
+        `/api/projetos/${cockpit.projeto.id}/decisao-gerencial`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tipo: "alteracao_status",
+            status_anterior: statusAnterior,
+            status_novo: statusNovoGerencial,
+            justificativa,
+            score_anterior: cockpit.score,
+            score_novo: classificacaoNova.score,
+            urgencia_anterior: cockpit.urgencia,
+            urgencia_nova: classificacaoNova.urgencia,
+            quadrante_anterior: cockpit.quadrante,
+            quadrante_novo: classificacaoNova.quadrante,
+          }),
+        },
+      );
+
+      const data = (await response.json()) as {
+        success?: boolean;
+        applied?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || `Erro HTTP ${response.status}`);
+      }
+
+      const projetoId = cockpit.projeto.id;
+      const projetoNome = cockpit.projeto.nome;
+      const statusAplicado = statusNovoGerencial;
+
+      setConfirmarDecisao(false);
+      setTipoDecisaoConfirmacao(null);
+      setStatusNovoGerencial(null);
+      setJustificativaDecisao("");
+
+      await sincronizarCockpitAposDecisao(
+        projetoId,
+        `${projetoNome}: status alterado para ${statusAplicado} com sucesso.`,
+      );
+    } catch (e) {
+      setErroDecisao(
+        e instanceof Error ? e.message : "Erro ao aplicar alteração gerencial de status.",
+      );
+    } finally {
+      setAplicandoDecisao(false);
+    }
+  }, [cockpit, statusNovoGerencial, justificativaDecisao, sincronizarCockpitAposDecisao]);
 
   const houveMudancaSimulacao =
     !!cockpit &&
@@ -639,7 +796,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
   };
 
   return (
-    <section className="space-y-4">
+    <section id="matriz-priorizacao" className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -849,6 +1006,28 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              {sucessoDecisao && (
+                <div className="mb-4 flex items-start justify-between gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.08] px-4 py-3 text-xs text-emerald-200">
+                  <div>
+                    <div className="font-semibold text-emerald-300">
+                      Decisão aplicada
+                    </div>
+                    <div className="mt-1 text-emerald-200/80">
+                      {sucessoDecisao}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSucessoDecisao("")}
+                    className="shrink-0 text-emerald-300/60 transition hover:text-emerald-200"
+                    aria-label="Fechar confirmação"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+
               <div className="grid gap-3 sm:grid-cols-4">
                 {[
                   ["Score executivo", cockpit.score, "text-sky-300"],
@@ -1223,7 +1402,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
               <div className="text-[9px] text-slate-600">
                 A aplicação exige confirmação e justificativa e será registrada no histórico.
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
                   disabled={
@@ -1276,6 +1455,56 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                 >
                   Aplicar redistribuição
                 </button>
+                {!['Finalizado', 'Cancelado'].includes(cockpit.projeto.status) &&
+                  cockpit.projeto.status !== "Pausado" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setErroDecisao("");
+                        setJustificativaDecisao("");
+                        setStatusNovoGerencial("Pausado");
+                        setTipoDecisaoConfirmacao("alteracao_status");
+                        setConfirmarDecisao(true);
+                      }}
+                      className="rounded-xl border border-amber-400/30 bg-amber-400/[0.09] px-4 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-400/[0.15]"
+                    >
+                      Pausar
+                    </button>
+                  )}
+
+                {!['Finalizado', 'Cancelado'].includes(cockpit.projeto.status) &&
+                  cockpit.projeto.status !== "Bloqueado" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setErroDecisao("");
+                        setJustificativaDecisao("");
+                        setStatusNovoGerencial("Bloqueado");
+                        setTipoDecisaoConfirmacao("alteracao_status");
+                        setConfirmarDecisao(true);
+                      }}
+                      className="rounded-xl border border-red-400/30 bg-red-400/[0.09] px-4 py-2 text-xs font-semibold text-red-200 hover:bg-red-400/[0.15]"
+                    >
+                      Bloquear
+                    </button>
+                  )}
+
+                {(cockpit.projeto.status === "Pausado" || cockpit.projeto.status === "Bloqueado") && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErroDecisao("");
+                      setJustificativaDecisao("");
+                      setStatusNovoGerencial("Em andamento");
+                      setTipoDecisaoConfirmacao("alteracao_status");
+                      setConfirmarDecisao(true);
+                    }}
+                    className="rounded-xl border border-sky-400/30 bg-sky-400/[0.09] px-4 py-2 text-xs font-semibold text-sky-200 hover:bg-sky-400/[0.15]"
+                  >
+                    Retomar
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => {
@@ -1303,14 +1532,18 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                       ? `Reprogramar prazo de ${cockpit.projeto.nome}`
                       : tipoDecisaoConfirmacao === "alteracao_prioridade"
                         ? `Alterar prioridade de ${cockpit.projeto.nome}`
-                        : `Redistribuir ${cockpit.projeto.nome}`}
+                        : tipoDecisaoConfirmacao === "alteracao_status"
+                          ? `${statusNovoGerencial === "Em andamento" ? "Retomar" : statusNovoGerencial === "Pausado" ? "Pausar" : "Bloquear"} ${cockpit.projeto.nome}`
+                          : `Redistribuir ${cockpit.projeto.nome}`}
                   </h4>
                   <div className="mt-1 text-[10px] text-slate-500">
                     {tipoDecisaoConfirmacao === "reprogramacao_prazo"
                       ? "Esta ação altera a data final real do projeto e cria registro de auditoria."
                       : tipoDecisaoConfirmacao === "alteracao_prioridade"
                         ? "Esta ação altera a prioridade real do projeto e cria registro de auditoria."
-                        : "Esta ação altera o responsável real do projeto e cria registro de auditoria."}
+                        : tipoDecisaoConfirmacao === "alteracao_status"
+                          ? "Esta ação altera o status real do projeto, registra o histórico operacional e a decisão gerencial."
+                          : "Esta ação altera o responsável real do projeto e cria registro de auditoria."}
                   </div>
                 </div>
 
@@ -1413,6 +1646,17 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                         </div>
                       </div>
                     </>
+                  ) : tipoDecisaoConfirmacao === "alteracao_status" ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                        <div className="text-[8px] uppercase tracking-[0.12em] text-slate-600">Status atual</div>
+                        <div className="mt-1 text-sm font-semibold text-white">{cockpit.projeto.status}</div>
+                      </div>
+                      <div className="rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-3">
+                        <div className="text-[8px] uppercase tracking-[0.12em] text-amber-400/60">Novo status</div>
+                        <div className="mt-1 text-sm font-semibold text-amber-200">{statusNovoGerencial}</div>
+                      </div>
+                    </div>
                   ) : (
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
@@ -1475,7 +1719,9 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                         ? "Ex.: Cliente solicitou nova data para conclusão e o prazo foi replanejado com o time."
                         : tipoDecisaoConfirmacao === "alteracao_prioridade"
                           ? "Ex.: Projeto elevado para prioridade crítica devido ao impacto operacional no cliente."
-                          : "Ex.: Redistribuição aprovada para reduzir concentração operacional e utilizar capacidade disponível."
+                          : tipoDecisaoConfirmacao === "alteracao_status"
+                            ? "Ex.: Projeto pausado temporariamente até a liberação do cliente e resolução do impedimento."
+                            : "Ex.: Redistribuição aprovada para reduzir concentração operacional e utilizar capacidade disponível."
                     }
                       className="w-full resize-none rounded-xl border border-white/[0.08] bg-[#080d20] px-3 py-3 text-xs text-white outline-none placeholder:text-slate-700 focus:border-emerald-400/35"
                     />
@@ -1512,7 +1758,9 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                         ? aplicarReprogramacaoPrazo
                         : tipoDecisaoConfirmacao === "alteracao_prioridade"
                           ? aplicarAlteracaoPrioridade
-                          : aplicarRedistribuicao
+                          : tipoDecisaoConfirmacao === "alteracao_status"
+                            ? aplicarAlteracaoStatus
+                            : aplicarRedistribuicao
                     }
                     className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.12] px-4 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-400/[0.18] disabled:cursor-not-allowed disabled:opacity-35"
                   >

@@ -66,6 +66,72 @@ type HistoricoItem = {
   created_at: string;
 };
 
+type AcompanhamentoGerencial = {
+  decisao_id: string;
+  acao: "manter" | "encerrar";
+  justificativa: string | null;
+  usuario_nome: string;
+  created_at: string;
+  efetividade?: string | null;
+  score_atual?: number | null;
+  urgencia_atual?: number | null;
+  saude_atual?: string | null;
+  progresso_atual?: number | null;
+};
+
+type AcompanhamentoTimeline = AcompanhamentoGerencial & {
+  historico_id: string;
+};
+
+function parseAcompanhamentoGerencial(
+  item: HistoricoItem,
+): AcompanhamentoTimeline | null {
+  if (item.campo !== "Acompanhamento gerencial" || !item.valor_novo) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(item.valor_novo) as Partial<AcompanhamentoGerencial>;
+
+    if (
+      typeof parsed.decisao_id !== "string" ||
+      (parsed.acao !== "manter" && parsed.acao !== "encerrar")
+    ) {
+      return null;
+    }
+
+    return {
+      historico_id: item.id,
+      decisao_id: parsed.decisao_id,
+      acao: parsed.acao,
+      justificativa:
+        typeof parsed.justificativa === "string" ? parsed.justificativa : null,
+      usuario_nome:
+        typeof parsed.usuario_nome === "string"
+          ? parsed.usuario_nome
+          : item.usuario_nome || "Sistema",
+      created_at:
+        typeof parsed.created_at === "string"
+          ? parsed.created_at
+          : item.created_at,
+      efetividade:
+        typeof parsed.efetividade === "string" ? parsed.efetividade : null,
+      score_atual:
+        typeof parsed.score_atual === "number" ? parsed.score_atual : null,
+      urgencia_atual:
+        typeof parsed.urgencia_atual === "number" ? parsed.urgencia_atual : null,
+      saude_atual:
+        typeof parsed.saude_atual === "string" ? parsed.saude_atual : null,
+      progresso_atual:
+        typeof parsed.progresso_atual === "number"
+          ? parsed.progresso_atual
+          : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 type Projeto360ModalProps = {
   projeto: Projeto | null;
   open: boolean;
@@ -439,8 +505,28 @@ export default function Projeto360Modal({
     (item) => item.campo === "Decisão gerencial",
   );
 
+  const acompanhamentosGerenciais = historico
+    .map(parseAcompanhamentoGerencial)
+    .filter((item): item is AcompanhamentoTimeline => Boolean(item))
+    .sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() -
+        new Date(a.created_at).getTime(),
+    );
+
+  const cicloGovernancaEncerrado = acompanhamentosGerenciais.some(
+    (item) => item.acao === "encerrar",
+  );
+
+  const ultimoAcompanhamento = acompanhamentosGerenciais[0] ?? null;
+
   const atividadeOperacional = historico.filter((item) => {
-    if (item.campo === "Decisão gerencial") return false;
+    if (
+      item.campo === "Decisão gerencial" ||
+      item.campo === "Acompanhamento gerencial"
+    ) {
+      return false;
+    }
 
     if (
       ["Responsável", "Data final", "Prioridade"].includes(item.campo) &&
@@ -741,6 +827,219 @@ export default function Projeto360Modal({
             </div>
 
             <div className="space-y-4">
+              {(decisoesGerenciais.length > 0 ||
+                acompanhamentosGerenciais.length > 0) && (
+                <section className="rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-cyan-500/[0.055] via-sky-500/[0.035] to-violet-500/[0.055] p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Scale size={15} className="text-cyan-300" />
+                      <div>
+                        <h3 className="text-sm font-semibold text-white">
+                          Governança Executiva
+                        </h3>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Decisões, reavaliações e encerramentos do ciclo gerencial.
+                        </p>
+                      </div>
+                    </div>
+
+                    <span
+                      className={[
+                        "rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.12em]",
+                        cicloGovernancaEncerrado
+                          ? "border-emerald-400/25 bg-emerald-500/[0.09] text-emerald-300"
+                          : ultimoAcompanhamento?.acao === "manter"
+                            ? "border-amber-400/25 bg-amber-500/[0.08] text-amber-300"
+                            : "border-sky-400/25 bg-sky-500/[0.08] text-sky-300",
+                      ].join(" ")}
+                    >
+                      {cicloGovernancaEncerrado
+                        ? "Ciclo encerrado"
+                        : ultimoAcompanhamento?.acao === "manter"
+                          ? "Em monitoramento"
+                          : "Decisão aplicada"}
+                    </span>
+                  </div>
+
+                  <div className="mt-5 space-y-0">
+                    {[
+                      ...decisoesGerenciais.map((item) => ({
+                        id: `decisao-${item.id}`,
+                        tipo: "decisao" as const,
+                        created_at: item.created_at,
+                        usuario_nome: item.usuario_nome || "Sistema",
+                        titulo: "Decisão gerencial aplicada",
+                        descricao: item.valor_novo || "Decisão executiva registrada.",
+                        justificativa: extrairDetalhe(
+                          item.valor_novo,
+                          "Justificativa",
+                        ),
+                        acompanhamento: null as AcompanhamentoTimeline | null,
+                      })),
+                      ...acompanhamentosGerenciais.map((item) => ({
+                        id: `acompanhamento-${item.historico_id}`,
+                        tipo: "acompanhamento" as const,
+                        created_at: item.created_at,
+                        usuario_nome: item.usuario_nome || "Sistema",
+                        titulo:
+                          item.acao === "encerrar"
+                            ? "Acompanhamento encerrado"
+                            : "Reavaliação gerencial",
+                        descricao:
+                          item.acao === "encerrar"
+                            ? "A gestão encerrou formalmente o ciclo de acompanhamento desta decisão."
+                            : "A decisão foi reavaliada e permanece em monitoramento.",
+                        justificativa: item.justificativa,
+                        acompanhamento: item,
+                      })),
+                    ]
+                      .sort(
+                        (a, b) =>
+                          new Date(a.created_at).getTime() -
+                          new Date(b.created_at).getTime(),
+                      )
+                      .map((evento, index, eventos) => {
+                        const encerramento =
+                          evento.tipo === "acompanhamento" &&
+                          evento.acompanhamento?.acao === "encerrar";
+                        const monitoramento =
+                          evento.tipo === "acompanhamento" &&
+                          evento.acompanhamento?.acao === "manter";
+
+                        return (
+                          <div
+                            key={evento.id}
+                            className="relative grid grid-cols-[28px_1fr] gap-3"
+                          >
+                            <div className="flex flex-col items-center">
+                              <div
+                                className={[
+                                  "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border",
+                                  encerramento
+                                    ? "border-emerald-400/30 bg-emerald-500/[0.12] text-emerald-300"
+                                    : monitoramento
+                                      ? "border-amber-400/30 bg-amber-500/[0.10] text-amber-300"
+                                      : "border-violet-400/30 bg-violet-500/[0.10] text-violet-300",
+                                ].join(" ")}
+                              >
+                                {encerramento ? (
+                                  <CheckCircle2 size={13} />
+                                ) : monitoramento ? (
+                                  <RefreshCw size={12} />
+                                ) : (
+                                  <Scale size={12} />
+                                )}
+                              </div>
+
+                              {index < eventos.length - 1 && (
+                                <div className="min-h-8 w-px flex-1 bg-gradient-to-b from-white/[0.12] to-white/[0.035]" />
+                              )}
+                            </div>
+
+                            <div className="pb-4">
+                              <div
+                                className={[
+                                  "rounded-xl border p-3.5",
+                                  encerramento
+                                    ? "border-emerald-400/15 bg-emerald-500/[0.045]"
+                                    : monitoramento
+                                      ? "border-amber-400/15 bg-amber-500/[0.035]"
+                                      : "border-violet-400/15 bg-black/15",
+                                ].join(" ")}
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                  <div>
+                                    <div
+                                      className={[
+                                        "text-[10px] font-bold uppercase tracking-[0.13em]",
+                                        encerramento
+                                          ? "text-emerald-300"
+                                          : monitoramento
+                                            ? "text-amber-300"
+                                            : "text-violet-300",
+                                      ].join(" ")}
+                                    >
+                                      {evento.titulo}
+                                    </div>
+                                    <div className="mt-1 text-[10px] text-slate-500">
+                                      {evento.usuario_nome}
+                                    </div>
+                                  </div>
+
+                                  <div className="text-[9px] text-slate-600">
+                                    {formatDateTime(evento.created_at)}
+                                  </div>
+                                </div>
+
+                                <p className="mt-2 text-[11px] leading-5 text-slate-400">
+                                  {evento.descricao}
+                                </p>
+
+                                {evento.justificativa && (
+                                  <div className="mt-3 rounded-lg border border-white/[0.05] bg-black/10 px-3 py-2.5">
+                                    <div className="text-[9px] font-bold uppercase tracking-[0.11em] text-slate-600">
+                                      {encerramento
+                                        ? "Parecer de encerramento"
+                                        : monitoramento
+                                          ? "Parecer da reavaliação"
+                                          : "Justificativa"}
+                                    </div>
+                                    <div className="mt-1 text-[11px] leading-5 text-slate-300">
+                                      {evento.justificativa}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {evento.acompanhamento && (
+                                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                    {evento.acompanhamento.saude_atual && (
+                                      <DecisionInfo
+                                        label="Saúde"
+                                        value={evento.acompanhamento.saude_atual}
+                                      />
+                                    )}
+
+                                    {evento.acompanhamento.progresso_atual !== null &&
+                                      evento.acompanhamento.progresso_atual !== undefined && (
+                                        <DecisionInfo
+                                          label="Progresso"
+                                          value={`${evento.acompanhamento.progresso_atual}%`}
+                                        />
+                                      )}
+
+                                    {evento.acompanhamento.score_atual !== null &&
+                                      evento.acompanhamento.score_atual !== undefined && (
+                                        <DecisionInfo
+                                          label="Score"
+                                          value={String(evento.acompanhamento.score_atual)}
+                                        />
+                                      )}
+
+                                    {evento.acompanhamento.urgencia_atual !== null &&
+                                      evento.acompanhamento.urgencia_atual !== undefined && (
+                                        <DecisionInfo
+                                          label="Urgência"
+                                          value={String(evento.acompanhamento.urgencia_atual)}
+                                        />
+                                      )}
+
+                                    {evento.acompanhamento.efetividade && (
+                                      <DecisionInfo
+                                        label="Efetividade"
+                                        value={evento.acompanhamento.efetividade}
+                                      />
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </section>
+              )}
+
               {decisoesGerenciais.length > 0 && (
                 <section className="rounded-2xl border border-violet-400/20 bg-violet-500/[0.045] p-5">
                   <div className="flex items-center gap-2">

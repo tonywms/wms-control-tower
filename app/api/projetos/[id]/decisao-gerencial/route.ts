@@ -4,10 +4,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type Body = {
-  tipo?: "redistribuicao" | "reprogramacao_prazo" | "alteracao_prioridade";
+  tipo?: "redistribuicao" | "reprogramacao_prazo" | "alteracao_prioridade" | "alteracao_status";
 
   prioridade_anterior?: string | null;
   prioridade_nova?: string | null;
+
+  status_anterior?: string | null;
+  status_novo?: "Pausado" | "Bloqueado" | "Em andamento" | null;
 
   responsavel_anterior_id?: string | null;
   responsavel_novo_id?: string | null;
@@ -61,7 +64,8 @@ export async function POST(
     if (
       body.tipo !== "redistribuicao" &&
       body.tipo !== "reprogramacao_prazo" &&
-      body.tipo !== "alteracao_prioridade"
+      body.tipo !== "alteracao_prioridade" &&
+      body.tipo !== "alteracao_status"
     ) {
       return NextResponse.json(
         { success: false, error: "Tipo de decisão gerencial inválido." },
@@ -95,7 +99,7 @@ export async function POST(
     const { data: projeto, error: projetoError } = await supabase
       .from("projetos")
       .select(
-        "id,nome,responsavel_id,responsavel_nome,data_fim,prioridade",
+        "id,nome,responsavel_id,responsavel_nome,data_fim,prioridade,status",
       )
       .eq("id", id)
       .maybeSingle();
@@ -272,6 +276,118 @@ export async function POST(
           tipo: "redistribuicao",
           responsavel_anterior: anteriorNome,
           responsavel_novo: novoNome,
+          justificativa,
+          aplicado_por: usuarioAtual.nome,
+          aplicado_em: agora,
+        },
+      });
+    }
+
+    // ============================================================
+    // ALTERAÇÃO GERENCIAL DE STATUS
+    // ============================================================
+    if (body.tipo === "alteracao_status") {
+      const statusAtual = projeto.status ?? null;
+      const statusEsperado = body.status_anterior ?? null;
+      const statusNovo = body.status_novo ?? null;
+
+      if (statusAtual !== statusEsperado) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "O status do projeto foi alterado por outro usuário. Atualize a governança e tente novamente.",
+          },
+          { status: 409 },
+        );
+      }
+
+      if (statusAtual === "Finalizado" || statusAtual === "Cancelado") {
+        return NextResponse.json(
+          { success: false, error: `O projeto está ${statusAtual} e não aceita nova decisão operacional.` },
+          { status: 409 },
+        );
+      }
+
+      const statusGerenciais = ["Pausado", "Bloqueado", "Em andamento"] as const;
+      if (!statusNovo || !statusGerenciais.includes(statusNovo)) {
+        return NextResponse.json(
+          { success: false, error: "Novo status gerencial inválido." },
+          { status: 400 },
+        );
+      }
+
+      if (statusNovo === statusAtual) {
+        return NextResponse.json(
+          { success: false, error: "O novo status deve ser diferente do status atual." },
+          { status: 400 },
+        );
+      }
+
+      const { data: atualizado, error: statusError } = await supabase.rpc(
+        "alterar_status_projeto",
+        {
+          p_projeto_id: id,
+          p_novo_status: statusNovo,
+          p_motivo: justificativa,
+          p_usuario_id: usuarioAtual.usuarioId,
+          p_usuario_nome: usuarioAtual.nome || "Sistema",
+        },
+      );
+
+      if (statusError) {
+        throw new Error(`Erro ao alterar status: ${statusError.message}`);
+      }
+
+      const detalhes = [
+        `Alteração gerencial de status: ${statusAtual || "Não informado"} → ${statusNovo}.`,
+        `Justificativa: ${justificativa}.`,
+        body.score_anterior != null && body.score_novo != null
+          ? `Score: ${body.score_anterior} → ${body.score_novo}.`
+          : null,
+        body.urgencia_anterior != null && body.urgencia_nova != null
+          ? `Urgência: ${body.urgencia_anterior} → ${body.urgencia_nova}.`
+          : null,
+        body.quadrante_anterior && body.quadrante_novo
+          ? `Quadrante: ${body.quadrante_anterior} → ${body.quadrante_novo}.`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      const { error: historicoError } = await supabase
+        .from("historico_projeto")
+        .insert({
+          projeto_id: id,
+          campo: "Decisão gerencial",
+          valor_anterior: texto(statusAtual),
+          valor_novo: detalhes,
+          usuario_id: usuarioAtual.usuarioId ?? null,
+          usuario_nome: usuarioAtual.nome || "Sistema",
+          origem: "governanca",
+          created_at: agora,
+        });
+
+      if (historicoError) {
+        return NextResponse.json(
+          {
+            success: false,
+            applied: true,
+            error:
+              "O status foi alterado, mas houve falha ao registrar a decisão na auditoria gerencial.",
+            details: historicoError.message,
+          },
+          { status: 500 },
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        projeto: atualizado,
+        decisao: {
+          tipo: "alteracao_status",
+          status_anterior: statusAtual,
+          status_novo: statusNovo,
           justificativa,
           aplicado_por: usuarioAtual.nome,
           aplicado_em: agora,

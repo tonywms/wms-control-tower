@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import CapacidadeEquipe from "./CapacidadeEquipe";
 import MatrizPriorizacao from "./MatrizPriorizacao";
 import CentralDecisoes from "./CentralDecisoes";
+import CentralDecisoesPendentes from "./CentralDecisoesPendentes";
 
 type ProjetoRisco = {
   id: string;
@@ -343,6 +344,10 @@ export default function GovernancaCentral({ onOpenProjeto }: Props) {
       <div className="my-8 h-px bg-gradient-to-r from-transparent via-sky-400/20 to-transparent" />
 
       <CapacidadeEquipe onOpenProjeto={onOpenProjeto} />
+
+      <div className="my-8 h-px bg-gradient-to-r from-transparent via-amber-400/20 to-transparent" />
+
+      <CentralDecisoesPendentes onOpenProjeto={onOpenProjeto} />
 
       <div className="my-8 h-px bg-gradient-to-r from-transparent via-violet-400/20 to-transparent" />
 

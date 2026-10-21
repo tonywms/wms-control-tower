@@ -567,6 +567,61 @@ export default function Projeto360Modal({
     return match?.[1]?.trim() || null;
   };
 
+  const acoesAbertas = acoesProjeto.filter(
+    (item) => item.status !== "Concluída" && item.status !== "Cancelada",
+  );
+
+  const acoesVencidas = acoesAbertas.filter(acaoEstaVencida);
+  const acoesSemResponsavel = acoesAbertas.filter((item) => !item.responsavel_id);
+  const acoesSemPrazo = acoesAbertas.filter((item) => !item.prazo);
+
+  const proximasAcoes = [...acoesAbertas]
+    .sort((a, b) => {
+      if (acaoEstaVencida(a) !== acaoEstaVencida(b)) {
+        return acaoEstaVencida(a) ? -1 : 1;
+      }
+      if (!!a.prazo !== !!b.prazo) return a.prazo ? -1 : 1;
+      if (a.prazo && b.prazo && a.prazo !== b.prazo) {
+        return a.prazo.localeCompare(b.prazo);
+      }
+      return (Number(a.ordem) || 0) - (Number(b.ordem) || 0);
+    })
+    .slice(0, 4);
+
+  const resumoExecutivo = (() => {
+    const partes: string[] = [];
+
+    if (projeto.status === "Pausado") {
+      partes.push("Projeto pausado e com retomada operacional pendente.");
+    } else if (projeto.status === "Bloqueado") {
+      partes.push("Projeto bloqueado e exigindo atuação para retorno ao fluxo.");
+    } else if (projeto.status === "Finalizado" && acoesAbertas.length > 0) {
+      partes.push(`Projeto finalizado, porém ainda possui ${acoesAbertas.length} ação(ões) aberta(s).`);
+    } else {
+      partes.push(`Projeto ${projeto.status.toLowerCase()} com ${acoesAbertas.length} ação(ões) aberta(s).`);
+    }
+
+    if (acoesVencidas.length > 0) {
+      partes.push(`${acoesVencidas.length} ação(ões) estão vencidas e exigem priorização.`);
+    } else if (proximasAcoes[0]?.prazo) {
+      partes.push(`Próximo compromisso em ${formatDate(proximasAcoes[0].prazo)}: ${proximasAcoes[0].titulo}.`);
+    }
+
+    if (impedimentoAberto) {
+      partes.push("Existe impedimento aberto no projeto.");
+    }
+
+    if (acoesSemResponsavel.length > 0) {
+      partes.push(`${acoesSemResponsavel.length} ação(ões) ainda estão sem responsável.`);
+    }
+
+    if (acoesSemPrazo.length > 0) {
+      partes.push(`${acoesSemPrazo.length} ação(ões) estão sem prazo definido.`);
+    }
+
+    return partes.join(" ");
+  })();
+
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center overflow-hidden bg-black/75 p-4 backdrop-blur-sm">
       <div className="flex h-[calc(100dvh-48px)] w-[min(1024px,calc(100vw-48px))] shrink-0 flex-col overflow-hidden rounded-[26px] border border-sky-400/25 bg-[#070d1b] shadow-2xl shadow-black/70"
@@ -722,6 +777,81 @@ export default function Projeto360Modal({
                 }}
               />
             </div>
+          </section>
+
+          {/* LEITURA EXECUTIVA / PLANO DE AÇÃO */}
+          <section className="mt-4 rounded-2xl border border-sky-400/15 bg-gradient-to-br from-sky-500/[0.055] via-cyan-500/[0.025] to-violet-500/[0.035] p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-sky-400">
+                  Leitura executiva
+                </div>
+                <h3 className="mt-1 text-base font-semibold text-white">
+                  Plano de ação do projeto
+                </h3>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full border border-white/[0.08] bg-black/15 px-2.5 py-1 text-[10px] font-semibold text-slate-300">
+                  {acoesAbertas.length} aberta(s)
+                </span>
+                {acoesVencidas.length > 0 && (
+                  <span className="rounded-full border border-rose-400/20 bg-rose-500/[0.08] px-2.5 py-1 text-[10px] font-semibold text-rose-300">
+                    {acoesVencidas.length} vencida(s)
+                  </span>
+                )}
+                {acoesSemPrazo.length > 0 && (
+                  <span className="rounded-full border border-amber-400/20 bg-amber-500/[0.07] px-2.5 py-1 text-[10px] font-semibold text-amber-300">
+                    {acoesSemPrazo.length} sem prazo
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              {resumoExecutivo}
+            </p>
+
+            {proximasAcoes.length > 0 ? (
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {proximasAcoes.map((acao) => {
+                  const vencida = acaoEstaVencida(acao);
+                  return (
+                    <div
+                      key={acao.id}
+                      className={[
+                        "rounded-xl border px-3.5 py-3",
+                        vencida
+                          ? "border-rose-400/20 bg-rose-500/[0.055]"
+                          : "border-white/[0.06] bg-black/15",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 text-xs font-semibold text-white">
+                          {acao.titulo}
+                        </div>
+                        {vencida && (
+                          <span className="shrink-0 rounded-md bg-rose-500/[0.1] px-1.5 py-0.5 text-[9px] font-bold text-rose-300">
+                            Vencida
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
+                        <span>{acao.responsavel?.nome ?? "Sem responsável"}</span>
+                        <span>•</span>
+                        <span className={vencida ? "text-rose-300" : ""}>
+                          {acao.prazo ? formatDate(acao.prazo) : "Sem prazo"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-dashed border-white/[0.08] px-4 py-4 text-center text-xs text-slate-500">
+                Nenhuma ação operacional aberta para este projeto.
+              </div>
+            )}
           </section>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">

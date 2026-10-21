@@ -52,7 +52,12 @@ import Projeto360Modal from "@/components/projetos/Projeto360Modal";
 import KanbanBoard from "@/components/kanban/KanbanBoard";
 import GanttBoard from "@/components/timeline/GanttBoard";
 import DashboardExecutivo from "@/components/dashboard/DashboardExecutivo";
+import OverviewExecutivo2 from "@/components/dashboard/OverviewExecutivo2";
 import GovernancaCentral from "@/components/governanca/GovernancaCentral";
+import AgendaExecutiva from "@/components/agenda/AgendaExecutiva";
+import CentralAlertas from "@/components/alertas/CentralAlertas";
+import NotificationCenter from "@/components/notificacoes/NotificationCenter";
+import CentralInconsistencias from "@/components/governanca/CentralInconsistencias";
 
 type Projeto = {
   id: string;
@@ -118,6 +123,10 @@ const menuItems = [
     active: true,
   },
   {
+    label: "Agenda Executiva",
+    icon: CalendarDays,
+  },
+  {
     label: "Carteira",
     icon: Layers3,
   },
@@ -151,6 +160,10 @@ const bottomMenu = [
   {
     label: "Governança",
     icon: Gauge,
+  },
+  {
+    label: "Inconsistências",
+    icon: ShieldAlert,
   },
   {
     label: "Configurações",
@@ -271,6 +284,50 @@ function getInitials(name: string | null) {
   return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
+
+function formatOperationalWindow(baseDate: Date) {
+  const meses = [
+    "JAN", "FEV", "MAR", "ABR", "MAI", "JUN",
+    "JUL", "AGO", "SET", "OUT", "NOV", "DEZ",
+  ];
+
+  const base = new Date(baseDate);
+  base.setHours(0, 0, 0, 0);
+
+  const diaSemana = base.getDay();
+  const inicio = new Date(base);
+
+  // Segunda a sexta: semana útil atual.
+  // Sábado/domingo: próxima semana útil.
+  if (diaSemana === 0) {
+    inicio.setDate(base.getDate() + 1);
+  } else if (diaSemana === 6) {
+    inicio.setDate(base.getDate() + 2);
+  } else {
+    inicio.setDate(base.getDate() - (diaSemana - 1));
+  }
+
+  const fim = new Date(inicio);
+  fim.setDate(inicio.getDate() + 4);
+
+  const diaInicio = String(inicio.getDate()).padStart(2, "0");
+  const diaFim = String(fim.getDate()).padStart(2, "0");
+  const mesInicio = meses[inicio.getMonth()];
+  const mesFim = meses[fim.getMonth()];
+  const anoInicio = inicio.getFullYear();
+  const anoFim = fim.getFullYear();
+
+  if (inicio.getMonth() === fim.getMonth() && anoInicio === anoFim) {
+    return `${diaInicio} — ${diaFim} ${mesFim} ${anoFim}`;
+  }
+
+  if (anoInicio === anoFim) {
+    return `${diaInicio} ${mesInicio} — ${diaFim} ${mesFim} ${anoFim}`;
+  }
+
+  return `${diaInicio} ${mesInicio} ${anoInicio} — ${diaFim} ${mesFim} ${anoFim}`;
+}
+
 export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -290,6 +347,14 @@ export default function Home() {
 
   const [selectedMenu, setSelectedMenu] =
     useState("Overview");
+
+  const operationalWindow = useMemo(
+    () =>
+      hoje
+        ? formatOperationalWindow(hoje)
+        : "Calculando...",
+    [hoje],
+  );
 
   const [selectedProjeto, setSelectedProjeto] =
     useState<Projeto | null>(null);
@@ -1306,13 +1371,7 @@ export default function Home() {
                 />
               </div>
 
-              <button className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.025] text-slate-500 hover:text-slate-200">
-                <Bell size={16} />
-
-                {criticalAlerts.length > 0 && (
-                  <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-400" />
-                )}
-              </button>
+              <NotificationCenter onOpenProjeto={openProjeto360ById} />
 
               <div className="ml-1 hidden h-8 w-px bg-white/[0.06] sm:block" />
 
@@ -1414,7 +1473,7 @@ export default function Home() {
                     </div>
 
                     <div className="mt-1 text-xs font-medium text-slate-300">
-                      05 — 09 OUT 2026
+                      {operationalWindow}
                     </div>
                   </div>
 
@@ -1460,11 +1519,18 @@ export default function Home() {
             {/* CONTEÚDO DINÂMICO */}
 
             {selectedMenu === "Overview" && (
-              <DashboardExecutivo onOpenProjeto={openProjeto360ById} />
+              <OverviewExecutivo2
+                onOpenProjeto={openProjeto360ById}
+                onOpenInconsistencias={() => setSelectedMenu("Inconsistências")}
+              />
             )}
 
             {selectedMenu === "Governança" ? (
               <GovernancaCentral onOpenProjeto={openProjeto360ById} />
+            ) : selectedMenu === "Inconsistências" ? (
+              <CentralInconsistencias onOpenProjeto={openProjeto360ById} />
+            ) : selectedMenu === "Agenda Executiva" ? (
+              <AgendaExecutiva onOpenProjeto={openProjeto360ById} />
             ) : selectedMenu === "Kanban" ? (
               <div className="mt-5">
                 <KanbanBoard

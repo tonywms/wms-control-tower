@@ -135,6 +135,19 @@ export async function POST(
 
       const responsavelNovoId = body.responsavel_novo_id ?? null;
 
+      // Governança não permite deixar um projeto sem responsável.
+      // Este fluxo aceita definir um responsável quando o projeto está órfão
+      // (NULL -> usuário) e redistribuir entre usuários (usuário -> usuário).
+      if (!responsavelNovoId) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Selecione um novo responsável para o projeto.",
+          },
+          { status: 400 },
+        );
+      }
+
       if (responsavelNovoId === responsavelAnteriorId) {
         return NextResponse.json(
           {
@@ -174,17 +187,26 @@ export async function POST(
         responsavelNovoNome = usuarioNovo.nome;
       }
 
-      const { data: atualizado, error: updateError } = await supabase
+      let updateResponsavelQuery = supabase
         .from("projetos")
         .update({
           responsavel_id: responsavelNovoId,
           responsavel_nome: responsavelNovoNome,
           updated_at: agora,
         })
-        .eq("id", id)
-        .eq("responsavel_id", responsavelAnteriorId)
-        .select("id,nome,responsavel_id,responsavel_nome,data_fim")
-        .maybeSingle();
+        .eq("id", id);
+
+      // PostgreSQL/Supabase exige IS NULL para comparar coluna nula.
+      // Isso permite a decisão gerencial: Sem responsável -> usuário.
+      updateResponsavelQuery =
+        responsavelAnteriorId === null
+          ? updateResponsavelQuery.is("responsavel_id", null)
+          : updateResponsavelQuery.eq("responsavel_id", responsavelAnteriorId);
+
+      const { data: atualizado, error: updateError } =
+        await updateResponsavelQuery
+          .select("id,nome,responsavel_id,responsavel_nome,data_fim")
+          .maybeSingle();
 
       if (updateError) {
         throw new Error(

@@ -470,6 +470,11 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     const responsavelAnteriorId = cockpit.projeto.responsavel?.id ?? null;
     const responsavelNovoId = simulacao.projeto.responsavel?.id ?? null;
 
+    if (!responsavelNovoId) {
+      setErroDecisao("Selecione um responsável para o projeto.");
+      return;
+    }
+
     if (responsavelAnteriorId === responsavelNovoId) {
       setErroDecisao("Selecione um responsável diferente para aplicar a redistribuição.");
       return;
@@ -522,7 +527,9 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
 
       await sincronizarCockpitAposDecisao(
         projetoId,
-        `Redistribuição aplicada com sucesso em ${projetoNome}.`,
+        cockpit.projeto.responsavel
+          ? `Redistribuição aplicada com sucesso em ${projetoNome}.`
+          : `Responsável definido com sucesso em ${projetoNome}.`,
       );
     } catch (e) {
       setErroDecisao(
@@ -796,7 +803,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
   };
 
   return (
-    <section id="matriz-priorizacao" className="space-y-4">
+    <section className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -1098,6 +1105,56 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                 </div>
               </div>
 
+              {!cockpit.projeto.responsavel && (
+                <div className="mt-4 rounded-2xl border border-red-400/20 bg-red-400/[0.045] p-4">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-red-300">
+                        Responsabilidade pendente
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-white">
+                        Este projeto está sem responsável definido
+                      </div>
+                      <div className="mt-1 text-[10px] leading-4 text-slate-500">
+                        Defina um responsável para retirar este risco da fila de governança. A alteração será confirmada e auditada como decisão gerencial.
+                      </div>
+                    </div>
+
+                    <label className="w-full lg:w-[320px]">
+                      <div className="mb-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        Novo responsável
+                      </div>
+                      <select
+                        value={simResponsavelId}
+                        onChange={(e) => setSimResponsavelId(e.target.value)}
+                        className="w-full rounded-xl border border-red-400/20 bg-[#090f26] px-3 py-2.5 text-xs text-white outline-none focus:border-sky-400/50"
+                      >
+                        <option value="" disabled>Selecione um responsável</option>
+                        {responsaveisDisponiveis.map((responsavel) => (
+                          <option key={responsavel.id} value={responsavel.id}>
+                            {responsavel.nome}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button
+                      type="button"
+                      disabled={!simResponsavelId}
+                      onClick={() => {
+                        setErroDecisao("");
+                        setJustificativaDecisao("");
+                        setTipoDecisaoConfirmacao("redistribuicao");
+                        setConfirmarDecisao(true);
+                      }}
+                      className="shrink-0 rounded-xl border border-emerald-400/30 bg-emerald-400/[0.12] px-4 py-2.5 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-400/[0.18] disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      Definir responsável
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="mt-4 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-4">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Decisões recomendadas
@@ -1207,7 +1264,9 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                       onChange={(e) => setSimResponsavelId(e.target.value)}
                       className="mt-2 w-full rounded-lg border border-white/[0.08] bg-[#090f26] px-3 py-2 text-xs text-white outline-none focus:border-sky-400/40"
                     >
-                      <option value="">Sem responsável</option>
+                      <option value="" disabled>
+                        {cockpit.projeto.responsavel ? "Selecione outro responsável" : "Selecione um responsável"}
+                      </option>
                       {responsaveisDisponiveis.map((responsavel) => (
                         <option key={responsavel.id} value={responsavel.id}>
                           {responsavel.nome}
@@ -1443,6 +1502,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                   type="button"
                   disabled={
                     !simulacao ||
+                    !simResponsavelId ||
                     simResponsavelId === (cockpit.projeto.responsavel?.id ?? "")
                   }
                   onClick={() => {
@@ -1453,7 +1513,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                   }}
                   className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.09] px-4 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-400/[0.15] disabled:cursor-not-allowed disabled:opacity-30"
                 >
-                  Aplicar redistribuição
+                  {cockpit.projeto.responsavel ? "Aplicar redistribuição" : "Definir responsável"}
                 </button>
                 {!['Finalizado', 'Cancelado'].includes(cockpit.projeto.status) &&
                   cockpit.projeto.status !== "Pausado" && (
@@ -1534,7 +1594,9 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                         ? `Alterar prioridade de ${cockpit.projeto.nome}`
                         : tipoDecisaoConfirmacao === "alteracao_status"
                           ? `${statusNovoGerencial === "Em andamento" ? "Retomar" : statusNovoGerencial === "Pausado" ? "Pausar" : "Bloquear"} ${cockpit.projeto.nome}`
-                          : `Redistribuir ${cockpit.projeto.nome}`}
+                          : cockpit.projeto.responsavel
+                            ? `Redistribuir ${cockpit.projeto.nome}`
+                            : `Definir responsável de ${cockpit.projeto.nome}`}
                   </h4>
                   <div className="mt-1 text-[10px] text-slate-500">
                     {tipoDecisaoConfirmacao === "reprogramacao_prazo"
@@ -1721,7 +1783,9 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
                           ? "Ex.: Projeto elevado para prioridade crítica devido ao impacto operacional no cliente."
                           : tipoDecisaoConfirmacao === "alteracao_status"
                             ? "Ex.: Projeto pausado temporariamente até a liberação do cliente e resolução do impedimento."
-                            : "Ex.: Redistribuição aprovada para reduzir concentração operacional e utilizar capacidade disponível."
+                            : cockpit.projeto.responsavel
+                              ? "Ex.: Redistribuição aprovada para reduzir concentração operacional e utilizar capacidade disponível."
+                              : "Ex.: Responsável definido para garantir continuidade, prazo e acompanhamento da entrega."
                     }
                       className="w-full resize-none rounded-xl border border-white/[0.08] bg-[#080d20] px-3 py-3 text-xs text-white outline-none placeholder:text-slate-700 focus:border-emerald-400/35"
                     />

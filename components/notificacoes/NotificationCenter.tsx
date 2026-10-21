@@ -1,0 +1,162 @@
+"use client";
+
+import { AlertTriangle, Bell, BellRing, Check, CheckCheck, ChevronRight, Clock3, RefreshCw, ShieldAlert, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+type Severidade = "Crítico" | "Atenção" | "Informativo";
+type Filtro = "Todas" | "Críticas" | "Não lidas";
+type Notificacao = {
+  id: string;
+  projeto_id: string | null;
+  projeto_nome: string | null;
+  tipo: string;
+  severidade: Severidade;
+  titulo: string;
+  descricao: string | null;
+  lida: boolean;
+  created_at: string | null;
+};
+type Props = { onOpenProjeto: (projetoId: string) => void | Promise<void> };
+
+function normalizar(payload: any): Notificacao[] {
+  const lista = payload?.notificacoes ?? payload?.items ?? payload?.data ?? [];
+  if (!Array.isArray(lista)) return [];
+  return lista.map((n: any, i: number) => ({
+    id: String(n.id ?? `${n.projeto_id ?? "global"}-${n.tipo ?? "notificacao"}-${i}`),
+    projeto_id: n.projeto_id ? String(n.projeto_id) : null,
+    projeto_nome: n.projeto_nome ?? n.projeto?.nome ?? null,
+    tipo: String(n.tipo ?? "Notificação"),
+    severidade: n.severidade === "Crítico" || n.severidade === "Atenção" ? n.severidade : "Informativo",
+    titulo: String(n.titulo ?? n.mensagem ?? "Notificação"),
+    descricao: n.descricao ?? null,
+    lida: Boolean(n.lida ?? n.read ?? false),
+    created_at: n.created_at ?? n.criado_em ?? null,
+  }));
+}
+
+function tempo(data: string | null) {
+  if (!data) return "";
+  const t = new Date(data).getTime();
+  if (Number.isNaN(t)) return "";
+  const m = Math.max(0, Math.floor((Date.now() - t) / 60000));
+  if (m < 1) return "Agora";
+  if (m < 60) return `Há ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `Há ${h}h`;
+  return `Há ${Math.floor(h / 24)}d`;
+}
+
+export default function NotificationCenter({ onOpenProjeto }: Props) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState("");
+  const [filtro, setFiltro] = useState<Filtro>("Todas");
+  const [notificacoes, setNotificacoes] = useState<Notificacao[]>([]);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  const carregar = useCallback(async (silencioso = false) => {
+    try {
+      if (!silencioso) setLoading(true);
+      setErro("");
+      const response = await fetch("/api/notificacoes", { cache: "no-store" });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || data?.success === false) throw new Error(data?.error || "Erro ao carregar notificações.");
+      setNotificacoes(normalizar(data));
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao carregar notificações.");
+    } finally {
+      if (!silencioso) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void carregar();
+    const timer = window.setInterval(() => void carregar(true), 60000);
+    return () => window.clearInterval(timer);
+  }, [carregar]);
+
+  useEffect(() => {
+    const fechar = (event: MouseEvent) => {
+      if (open && ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", fechar);
+    return () => document.removeEventListener("mousedown", fechar);
+  }, [open]);
+
+  const naoLidas = useMemo(() => notificacoes.filter(n => !n.lida).length, [notificacoes]);
+  const criticas = useMemo(() => notificacoes.filter(n => !n.lida && n.severidade === "Crítico").length, [notificacoes]);
+  const visiveis = useMemo(() => {
+    if (filtro === "Críticas") return notificacoes.filter(n => n.severidade === "Crítico");
+    if (filtro === "Não lidas") return notificacoes.filter(n => !n.lida);
+    return notificacoes;
+  }, [notificacoes, filtro]);
+
+  async function marcarLida(n: Notificacao) {
+    if (n.lida) return;
+    setNotificacoes(atual => atual.map(x => x.id === n.id ? { ...x, lida: true } : x));
+    try {
+      await fetch(`/api/notificacoes/${encodeURIComponent(n.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lida: true }),
+      });
+    } catch {}
+  }
+
+  async function marcarTodas() {
+    setNotificacoes(atual => atual.map(x => ({ ...x, lida: true })));
+    try {
+      await fetch("/api/notificacoes", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ marcar_todas_lidas: true }),
+      });
+    } catch {}
+  }
+
+  async function abrir(n: Notificacao) {
+    await marcarLida(n);
+    if (n.projeto_id) {
+      setOpen(false);
+      await onOpenProjeto(n.projeto_id);
+    }
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" aria-label="Notificações" onClick={() => setOpen(v => !v)} className={`relative flex h-9 w-9 items-center justify-center rounded-xl border transition ${open ? "border-sky-400/25 bg-sky-400/[0.10] text-sky-200" : "border-white/[0.06] bg-white/[0.025] text-slate-500 hover:text-sky-200"}`}>
+        {naoLidas ? <BellRing size={16}/> : <Bell size={16}/>} 
+        {naoLidas > 0 && <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-[#070a10] bg-red-500 px-1 text-[8px] font-bold text-white">{naoLidas > 99 ? "99+" : naoLidas}</span>}
+      </button>
+
+      {open && <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-[2px] sm:absolute sm:inset-auto sm:right-0 sm:top-[calc(100%+12px)] sm:bg-transparent sm:backdrop-blur-none">
+        <div className="absolute inset-y-0 right-0 flex w-[min(460px,100vw)] flex-col border-l border-sky-400/15 bg-[#07101d]/98 shadow-[-24px_0_70px_rgba(0,0,0,.6)] sm:relative sm:max-h-[78vh] sm:overflow-hidden sm:rounded-2xl sm:border">
+          <div className="border-b border-white/[0.06] p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div><div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[.16em] text-sky-300"><BellRing size={13}/>Central de notificações</div><h3 className="mt-2 text-lg font-semibold text-white">Suas exceções executivas</h3><p className="mt-1 text-[10px] text-slate-500">Riscos, prazos e eventos que exigem acompanhamento.</p></div>
+              <button onClick={() => setOpen(false)} className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-2 text-slate-500 hover:text-white"><X size={16}/></button>
+            </div>
+            <div className="mt-4 grid grid-cols-3 gap-2"><Resumo label="Não lidas" value={naoLidas} tone="sky"/><Resumo label="Críticas" value={criticas} tone="red"/><Resumo label="Total" value={notificacoes.length} tone="slate"/></div>
+            <div className="mt-4 flex items-center gap-2">
+              {(["Todas","Críticas","Não lidas"] as Filtro[]).map(f => <button key={f} onClick={() => setFiltro(f)} className={`rounded-lg border px-3 py-1.5 text-[9px] ${filtro === f ? "border-sky-400/20 bg-sky-400/[0.09] text-sky-200" : "border-white/[0.05] text-slate-600"}`}>{f}</button>)}
+              <button onClick={() => void marcarTodas()} disabled={!naoLidas} className="ml-auto flex items-center gap-1.5 text-[9px] text-slate-600 hover:text-emerald-300 disabled:opacity-30"><CheckCheck size={13}/>Ler todas</button>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {loading && !notificacoes.length ? <Estado icon={<RefreshCw size={15} className="animate-spin"/>} texto="Sincronizando notificações..."/> : erro && !notificacoes.length ? <Estado icon={<AlertTriangle size={15}/>} texto={erro}/> : !visiveis.length ? <Estado icon={<CheckCheck size={18}/>} texto="Nada pendente neste filtro."/> :
+              <div className="divide-y divide-white/[0.045]">{visiveis.map(n => <div key={n.id} className={`group p-4 hover:bg-white/[0.018] ${!n.lida ? "bg-sky-400/[0.018]" : ""}`}>
+                <div className="flex gap-3"><Icone severidade={n.severidade}/><button disabled={!n.projeto_id} onClick={() => void abrir(n)} className="min-w-0 flex-1 text-left disabled:cursor-default">
+                  <div className="flex flex-wrap items-center gap-2"><span className="truncate text-[11px] font-semibold text-slate-200">{n.projeto_nome || "Control Tower"}</span><Badge severidade={n.severidade} texto={n.tipo}/>{!n.lida && <span className="h-1.5 w-1.5 rounded-full bg-sky-400"/>}</div>
+                  <div className="mt-1.5 text-[10px] font-medium text-slate-400">{n.titulo}</div>{n.descricao && <div className="mt-1 line-clamp-2 text-[9px] leading-4 text-slate-600">{n.descricao}</div>}
+                  <div className="mt-2 flex items-center gap-3 text-[8px] text-slate-700">{n.created_at && <span className="flex items-center gap-1"><Clock3 size={10}/>{tempo(n.created_at)}</span>}{n.projeto_id && <span className="flex items-center gap-1 text-sky-500/80">Abrir Projeto 360<ChevronRight size={10}/></span>}</div>
+                </button>{!n.lida && <button title="Marcar como lida" onClick={() => void marcarLida(n)} className="self-start rounded-lg p-1.5 text-slate-700 opacity-0 hover:text-emerald-300 group-hover:opacity-100"><Check size={13}/></button>}</div>
+              </div>)}</div>}
+          </div>
+          <div className="flex items-center justify-between border-t border-white/[0.06] px-4 py-3"><span className="text-[8px] text-slate-700">Atualização automática a cada 60 segundos</span><button onClick={() => void carregar()} className="flex items-center gap-1.5 text-[9px] text-slate-600 hover:text-sky-300"><RefreshCw size={11}/>Atualizar</button></div>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+function Icone({severidade}:{severidade:Severidade}) { const c=severidade==="Crítico"?"bg-red-400/[.07] text-red-300":severidade==="Atenção"?"bg-amber-400/[.07] text-amber-300":"bg-sky-400/[.07] text-sky-300"; return <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${c}`}>{severidade==="Crítico"?<ShieldAlert size={14}/>:severidade==="Atenção"?<AlertTriangle size={14}/>:<Bell size={14}/>}</div> }
+function Badge({severidade,texto}:{severidade:Severidade;texto:string}) { const c=severidade==="Crítico"?"border-red-400/15 bg-red-400/[.05] text-red-300":severidade==="Atenção"?"border-amber-400/15 bg-amber-400/[.05] text-amber-300":"border-sky-400/15 bg-sky-400/[.05] text-sky-300"; return <span className={`rounded-full border px-2 py-0.5 text-[8px] ${c}`}>{texto}</span> }
+function Resumo({label,value,tone}:{label:string;value:number;tone:"sky"|"red"|"slate"}) { const c=tone==="red"?"border-red-400/10 bg-red-400/[.035] text-red-300":tone==="sky"?"border-sky-400/10 bg-sky-400/[.035] text-sky-300":"border-white/[.05] bg-white/[.02] text-slate-300"; return <div className={`rounded-xl border p-3 ${c}`}><div className="text-lg font-semibold">{value}</div><div className="mt-1 text-[8px] uppercase tracking-[.12em] opacity-60">{label}</div></div> }
+function Estado({icon,texto}:{icon:React.ReactNode;texto:string}) { return <div className="flex min-h-[260px] items-center justify-center px-8 text-center text-[10px] text-slate-600"><div><div className="mb-2 flex justify-center">{icon}</div>{texto}</div></div> }

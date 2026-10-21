@@ -55,6 +55,7 @@ import DashboardExecutivo from "@/components/dashboard/DashboardExecutivo";
 import OverviewExecutivo2 from "@/components/dashboard/OverviewExecutivo2";
 import GovernancaCentral from "@/components/governanca/GovernancaCentral";
 import AgendaExecutiva from "@/components/agenda/AgendaExecutiva";
+import PlanejamentoSemanal from "@/components/planejamento/PlanejamentoSemanal";
 import CentralAlertas from "@/components/alertas/CentralAlertas";
 import NotificationCenter from "@/components/notificacoes/NotificationCenter";
 import CentralInconsistencias from "@/components/governanca/CentralInconsistencias";
@@ -125,6 +126,10 @@ const menuItems = [
   {
     label: "Agenda Executiva",
     icon: CalendarDays,
+  },
+  {
+    label: "Plano da Semana",
+    icon: Target,
   },
   {
     label: "Carteira",
@@ -1531,6 +1536,8 @@ export default function Home() {
               <CentralInconsistencias onOpenProjeto={openProjeto360ById} />
             ) : selectedMenu === "Agenda Executiva" ? (
               <AgendaExecutiva onOpenProjeto={openProjeto360ById} />
+            ) : selectedMenu === "Plano da Semana" ? (
+              <PlanejamentoSemanal onOpenProjeto={openProjeto360ById} />
             ) : selectedMenu === "Kanban" ? (
               <div className="mt-5">
                 <KanbanBoard

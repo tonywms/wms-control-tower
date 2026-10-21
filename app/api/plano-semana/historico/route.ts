@@ -1,0 +1,156 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requirePermission } from "@/lib/auth/permissions";
+
+const FECHADAS = new Set(["Concluída", "Concluído", "Cancelada", "Cancelado"]);
+
+async function getSupabase() {
+  if (process.env.NODE_ENV !== "production") return createAdminClient();
+  return await createClient();
+}
+
+function dataValida(v: unknown) {
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+export async function GET() {
+  try {
+    const permission = await requirePermission("visualizar");
+    if (!permission.ok) {
+      return NextResponse.json({ success: false, error: permission.error }, { status: permission.status });
+    }
+
+    const supabase = await getSupabase();
+    const { data, error } = await supabase
+      .from("plano_semana_historico")
+      .select("*")
+      .order("inicio_semana", { ascending: false })
+      .limit(52);
+
+    if (error) throw new Error(error.message);
+
+    return NextResponse.json({ success: true, semanas: data ?? [] });
+  } catch (error) {
+    console.error("[GET /api/plano-semana/historico]", error);
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : "Erro ao carregar histórico semanal." },
+      { status: 500 },
+    );
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const permission = await requirePermission("editar");
+    if (!permission.ok) {
+      return NextResponse.json({ success: false, error: permission.error }, { status: permission.status });
+    }
+
+    const body = await req.json();
+    const inicio = body?.inicio;
+    const fim = body?.fim;
+
+    if (!dataValida(inicio) || !dataValida(fim) || inicio > fim) {
+      return NextResponse.json({ success: false, error: "Período semanal inválido." }, { status: 400 });
+    }
+
+    const supabase = await getSupabase();
+
+    const { data: acoes, error: acoesError } = await supabase
+      .from("projeto_acoes")
+      .select(`
+        id, projeto_id, titulo, status, prioridade, prazo, concluida_em, responsavel_id,
+        responsavel:usuarios!projeto_acoes_responsavel_id_fkey(id,nome)
+      `)
+      .gte("prazo", inicio)
+      .lte("prazo", fim);
+
+    if (acoesError) throw new Error(acoesError.message);
+
+    const itens = (acoes ?? []).filter((a: any) => a.status !== "Cancelada" && a.status !== "Cancelado");
+    const hoje = new Date().toISOString().slice(0, 10);
+
+    const concluidas = itens.filter((a: any) => a.status === "Concluída" || a.status === "Concluído");
+    const pendentes = itens.filter((a: any) => !FECHADAS.has(a.status));
+    const atrasadas = pendentes.filter((a: any) => !!a.prazo && a.prazo < hoje);
+
+    const porResponsavel = new Map<string, {
+      nome: string;
+      planejadas: number;
+      concluidas: number;
+      pendentes: number;
+      atrasadas: number;
+      percentual: number;
+    }>();
+
+    for (const a of itens as any[]) {
+      const rel = Array.isArray(a.responsavel) ? a.responsavel[0] : a.responsavel;
+      const nome = rel?.nome ?? "Sem responsável";
+      const atual = porResponsavel.get(nome) ?? {
+        nome, planejadas: 0, concluidas: 0, pendentes: 0, atrasadas: 0, percentual: 0,
+      };
+
+      atual.planejadas += 1;
+      if (a.status === "Concluída" || a.status === "Concluído") {
+        atual.concluidas += 1;
+      } else if (!FECHADAS.has(a.status)) {
+        atual.pendentes += 1;
+        if (a.prazo && a.prazo < hoje) atual.atrasadas += 1;
+      }
+      porResponsavel.set(nome, atual);
+    }
+
+    const responsaveis = [...porResponsavel.values()]
+      .map((r) => ({
+        ...r,
+        percentual: r.planejadas ? Math.round((r.concluidas / r.planejadas) * 100) : 0,
+      }))
+      .sort((a, b) => b.planejadas - a.planejadas || b.percentual - a.percentual);
+
+    const planejadas = itens.length;
+    const percentualExecucao = planejadas ? Math.round((concluidas.length / planejadas) * 100) : 0;
+    const percentualRisco = planejadas ? Math.round((atrasadas.length / planejadas) * 100) : 0;
+    const statusFechamento = hoje >= fim ? "Fechada" : "Parcial";
+    const agora = new Date().toISOString();
+
+    const registro = {
+      inicio_semana: inicio,
+      fim_semana: fim,
+      status_fechamento: statusFechamento,
+      planejadas,
+      concluidas: concluidas.length,
+      pendentes: pendentes.length,
+      atrasadas: atrasadas.length,
+      percentual_execucao: percentualExecucao,
+      percentual_risco: percentualRisco,
+      responsaveis,
+      registrado_por: permission.usuario.usuarioId ?? null,
+      registrado_por_nome: permission.usuario.nome || "Sistema",
+      registrado_em: agora,
+      atualizado_em: agora,
+    };
+
+    const { data, error } = await supabase
+      .from("plano_semana_historico")
+      .upsert(registro, { onConflict: "inicio_semana,fim_semana" })
+      .select("*")
+      .single();
+
+    if (error) throw new Error(error.message);
+
+    return NextResponse.json({
+      success: true,
+      semana: data,
+      message: statusFechamento === "Fechada"
+        ? "Semana fechada e registrada no histórico."
+        : "Fotografia parcial da semana registrada no histórico.",
+    });
+  } catch (error) {
+    console.error("[POST /api/plano-semana/historico]", error);
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : "Erro ao registrar semana." },
+      { status: 500 },
+    );
+  }
+}

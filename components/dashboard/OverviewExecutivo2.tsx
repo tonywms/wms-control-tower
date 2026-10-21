@@ -77,7 +77,13 @@ export default function OverviewExecutivo2({onOpenProjeto,onOpenInconsistencias}
   const indiceConsistencia=consistencia.projetosAnalisados?clamp(((consistencia.projetosAnalisados-consistencia.projetosAfetados)/consistencia.projetosAnalisados)*100):100;
   const faixaConsistencia=indiceConsistencia>=85?{label:"Excelente",tone:"emerald"}:indiceConsistencia>=70?{label:"Saudável",tone:"sky"}:indiceConsistencia>=50?{label:"Atenção",tone:"amber"}:{label:"Crítico",tone:"red"};
   const eficienciaSaneamento=(consistencia.total+historicoResumo.total)>0?clamp((historicoResumo.total/(consistencia.total+historicoResumo.total))*100):0;
-  const saneados7=useMemo(()=>{const limite=Date.now()-7*86400000;return saneamentos.filter(s=>new Date(s.saneado_em).getTime()>=limite).length},[saneamentos]);
+  const [agoraMs,setAgoraMs]=useState<number|null>(null);
+  useEffect(()=>{setAgoraMs(Date.now())},[]);
+  const saneados7=useMemo(()=>{
+    if(agoraMs===null)return 0;
+    const limite=agoraMs-7*86400000;
+    return saneamentos.filter(s=>new Date(s.saneado_em).getTime()>=limite).length;
+  },[saneamentos,agoraMs]);
   const pressao=clamp((consistencia.criticos*12)+(agenda.vencidas*10)+(agenda.sem*4)+(resumo.criticos*5));
   const faixaPressao=pressao>=70?"Crítica":pressao>=40?"Alta":pressao>=20?"Moderada":"Controlada";
 

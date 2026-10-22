@@ -4,7 +4,6 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
-  Bell,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
@@ -36,7 +35,6 @@ import {
   Workflow,
   ShieldAlert,
   ArrowUpRight,
-  ArrowDownRight,
 } from "lucide-react";
 
 import {
@@ -45,18 +43,17 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useRouter } from "next/navigation";
 
 import ProjetoActions from "@/components/projetos/ProjetoActions";
 import ProjetoModal from "@/components/projetos/ProjetoModal";
 import Projeto360Modal from "@/components/projetos/Projeto360Modal";
 import KanbanBoard from "@/components/kanban/KanbanBoard";
 import GanttBoard from "@/components/timeline/GanttBoard";
-import DashboardExecutivo from "@/components/dashboard/DashboardExecutivo";
 import OverviewExecutivo2 from "@/components/dashboard/OverviewExecutivo2";
 import GovernancaCentral from "@/components/governanca/GovernancaCentral";
 import AgendaExecutiva from "@/components/agenda/AgendaExecutiva";
 import PlanejamentoSemanal from "@/components/planejamento/PlanejamentoSemanal";
-import CentralAlertas from "@/components/alertas/CentralAlertas";
 import NotificationCenter from "@/components/notificacoes/NotificationCenter";
 import CentralInconsistencias from "@/components/governanca/CentralInconsistencias";
 
@@ -173,6 +170,20 @@ const bottomMenu = [
   {
     label: "Configurações",
     icon: Settings2,
+    children: [
+      {
+        label: "Clientes",
+        href: "/configuracoes/clientes",
+      },
+      {
+        label: "Usuários & Equipe",
+        href: "/configuracoes/usuarios",
+      },
+      {
+        label: "Etapas",
+        href: "/configuracoes/etapas",
+      },
+    ],
   },
 ];
 
@@ -334,6 +345,7 @@ function formatOperationalWindow(baseDate: Date) {
 }
 
 export default function Home() {
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [projetos, setProjetos] = useState<Projeto[]>([]);
@@ -344,6 +356,7 @@ export default function Home() {
   const [error, setError] = useState("");
 
   const [search, setSearch] = useState("");
+  const [carteiraCompletaOpen, setCarteiraCompletaOpen] = useState(false);
 
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
@@ -352,6 +365,9 @@ export default function Home() {
 
   const [selectedMenu, setSelectedMenu] =
     useState("Overview");
+
+  const [configuracoesOpen, setConfiguracoesOpen] =
+    useState(false);
 
   const operationalWindow = useMemo(
     () =>
@@ -377,12 +393,16 @@ export default function Home() {
     useState(false);
 
   const openProjeto360 = useCallback(
-    (projeto: Projeto) => {
-      setProjeto360(projeto);
-      setProjeto360Open(true);
-    },
-    [],
-  );
+  (projeto: Projeto) => {
+    // Garante exclusividade entre os modais.
+    setModalOpen(false);
+    setSelectedProjeto(null);
+
+    setProjeto360(projeto);
+    setProjeto360Open(true);
+  },
+  [],
+);
 
   const closeProjeto360 = useCallback(() => {
     setProjeto360Open(false);
@@ -442,12 +462,31 @@ export default function Home() {
   );
 
   const openEditProjeto = useCallback(
-    (projeto: Projeto) => {
-      setSelectedProjeto(projeto);
-      setModalOpen(true);
-    },
-    [],
-  );
+  (projeto: Projeto) => {
+    // Garante exclusividade entre os modais.
+    setProjeto360Open(false);
+    setProjeto360(null);
+
+    setSelectedProjeto(projeto);
+    setModalOpen(true);
+  },
+  [],
+);
+
+  const openCarteiraCompleta = useCallback(() => {
+    setCarteiraCompletaOpen(true);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document
+          .getElementById("carteira-completa")
+          ?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+      });
+    });
+  }, []);
 
   const closeEditProjeto = useCallback(() => {
     setModalOpen(false);
@@ -1162,7 +1201,7 @@ export default function Home() {
         );
       }
 
-      window.location.assign("/login");
+      router.replace("/login");
     } catch (error) {
       console.error("[Control Tower] Erro ao sair:", error);
       setLogoutLoading(false);
@@ -1292,26 +1331,75 @@ export default function Home() {
                 const Icon = item.icon;
                 const active =
                   selectedMenu === item.label;
+                const hasChildren =
+                  "children" in item &&
+                  Array.isArray(item.children);
 
                 return (
-                  <button
-                    key={item.label}
-                    onClick={() => {
-                      setSelectedMenu(
-                        item.label,
-                      );
-                      setSidebarOpen(false);
-                    }}
-                    className={[
-                      "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] transition",
-                      active
-                        ? "bg-white/[0.06] text-white"
-                        : "text-slate-500 hover:bg-white/[0.035] hover:text-slate-200",
-                    ].join(" ")}
-                  >
-                    <Icon size={16} />
-                    <span>{item.label}</span>
-                  </button>
+                  <div key={item.label}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (hasChildren) {
+                          setSelectedMenu(item.label);
+                          setConfiguracoesOpen(
+                            (open) => !open,
+                          );
+                          return;
+                        }
+
+                        setSelectedMenu(item.label);
+                        setSidebarOpen(false);
+                      }}
+                      className={[
+                        "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] transition",
+                        active
+                          ? "bg-white/[0.06] text-white"
+                          : "text-slate-500 hover:bg-white/[0.035] hover:text-slate-200",
+                      ].join(" ")}
+                    >
+                      <Icon size={16} />
+
+                      <span className="flex-1">
+                        {item.label}
+                      </span>
+
+                      {hasChildren && (
+                        <ChevronDown
+                          size={14}
+                          className={[
+                            "transition-transform duration-200",
+                            configuracoesOpen
+                              ? "rotate-180"
+                              : "",
+                          ].join(" ")}
+                        />
+                      )}
+                    </button>
+
+                    {hasChildren &&
+                      configuracoesOpen && (
+                        <div className="ml-4 mt-1 space-y-1 border-l border-white/[0.06] pl-3">
+                          {item.children?.map(
+                            (child) => (
+                              <button
+                                key={child.href}
+                                type="button"
+                                onClick={() => {
+                                  setSidebarOpen(false);
+                                  router.push(
+                                    child.href,
+                                  );
+                                }}
+                                className="flex w-full items-center rounded-lg px-3 py-2 text-left text-[12px] text-slate-500 transition hover:bg-white/[0.035] hover:text-sky-200"
+                              >
+                                {child.label}
+                              </button>
+                            ),
+                          )}
+                        </div>
+                      )}
+                  </div>
                 );
               })}
             </nav>
@@ -1543,16 +1631,16 @@ export default function Home() {
                 <KanbanBoard
                   projetos={projetos}
                   onUpdated={loadProjetos}
-                  onEdit={openEditProjeto}
-                  onOpen360={openProjeto360}
+                  onEdit={(projeto) => openEditProjeto(projeto as Projeto)}
+                  onOpen360={(projeto) => openProjeto360(projeto as Projeto)}
                 />
               </div>
             ) : selectedMenu === "Gantt / Timeline" ? (
               <div className="mt-5">
                 <GanttBoard
                   projetos={projetos}
-                  onEdit={openEditProjeto}
-                  onOpen360={openProjeto360}
+                  onEdit={(projeto) => openEditProjeto(projeto as Projeto)}
+                  onOpen360={(projeto) => openProjeto360(projeto as Projeto)}
                 />
               </div>
             ) : (
@@ -2278,11 +2366,8 @@ export default function Home() {
                       </div>
 
                       <button
-                        onClick={() =>
-                          setSelectedMenu(
-                            "Carteira",
-                          )
-                        }
+                        type="button"
+                        onClick={openCarteiraCompleta}
                         className="text-[10px] font-medium text-sky-400 hover:text-sky-300"
                       >
                         Ver carteira
@@ -2712,6 +2797,80 @@ export default function Home() {
                   </section>
                 </div>
 
+                {carteiraCompletaOpen && (
+                  <section
+                    id="carteira-completa"
+                    className="mt-5 scroll-mt-6 overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.025]"
+                  >
+                    <div className="flex flex-col gap-3 border-b border-white/[0.05] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Layers3
+                            size={14}
+                            className="text-sky-300"
+                          />
+
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">
+                            Carteira completa
+                          </div>
+                        </div>
+
+                        <div className="mt-1 text-xs text-slate-600">
+                          {projetosFiltrados.length} projeto
+                          {projetosFiltrados.length === 1 ? "" : "s"} na visão atual
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <div className="relative">
+                          <Search
+                            size={14}
+                            className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600"
+                          />
+
+                          <input
+                            value={search}
+                            onChange={(event) =>
+                              setSearch(event.target.value)
+                            }
+                            placeholder="Filtrar carteira..."
+                            className="h-9 w-full min-w-[220px] rounded-xl border border-white/[0.06] bg-black/20 pl-9 pr-3 text-xs text-slate-200 outline-none transition placeholder:text-slate-700 focus:border-sky-400/20 focus:bg-white/[0.04] sm:w-[260px]"
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCarteiraCompletaOpen(false);
+                            setSearch("");
+                          }}
+                          className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.025] text-slate-600 transition hover:bg-white/[0.04] hover:text-slate-300"
+                          aria-label="Fechar carteira completa"
+                          title="Fechar carteira completa"
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="divide-y divide-white/[0.04]">
+                      {projetosFiltrados.length === 0 ? (
+                        <EmptyState text="Nenhum projeto encontrado para essa busca." />
+                      ) : (
+                        projetosFiltrados.map((projeto) => (
+                          <ProjectRow
+                            key={projeto.id}
+                            projeto={projeto}
+                            onOpen360={openProjeto360}
+                            onEdit={openEditProjeto}
+                            onUpdated={loadProjetos}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </section>
+                )}
+
                 {/* =====================================================
                     DATABASE STATUS
                    ===================================================== */}
@@ -2821,9 +2980,10 @@ export default function Home() {
         projeto={projeto360}
         open={projeto360Open}
         onClose={closeProjeto360}
-        onEdit={(projeto) => {
+        onEdit={() => {
+          const projetoCompleto = projetos.find((item) => item.id === projeto360?.id);
           closeProjeto360();
-          openEditProjeto(projeto);
+          if (projetoCompleto) openEditProjeto(projetoCompleto);
         }}
       />
 

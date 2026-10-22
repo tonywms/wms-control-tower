@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Users,
   Search,
@@ -49,7 +50,7 @@ const SETORES_OPCOES = [
 ];
 
 export default function UsuariosPage() {
-  const { can, loading: permissionsLoading } = usePermissions();
+  const { can } = usePermissions();
 
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [loading, setLoading] = useState(true);
@@ -194,9 +195,9 @@ export default function UsuariosPage() {
         {/* HEADER */}
         <header className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between border-b border-white/[0.06] pb-6">
           <div>
-            <a href="/" className="mb-3 inline-flex items-center gap-2 text-xs text-slate-500 hover:text-white">
+            <Link href="/" className="mb-3 inline-flex items-center gap-2 text-xs text-slate-500 hover:text-white">
               <ChevronLeft size={14} /> Control Tower
-            </a>
+            </Link>
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-400/10 text-sky-300">
                 <Users size={22} />

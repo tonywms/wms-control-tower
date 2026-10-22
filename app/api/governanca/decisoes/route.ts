@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { requirePermission } from "@/lib/auth/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -283,6 +284,7 @@ export async function GET() {
       decisoes,
     });
   } catch (error) {
+      unstable_rethrow(error);
     console.error("[GET /api/governanca/decisoes]", error);
 
     return NextResponse.json(

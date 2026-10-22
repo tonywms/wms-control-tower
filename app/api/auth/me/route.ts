@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { getCurrentUserContext } from "@/lib/auth/permissions";
 
 export async function GET() {
@@ -44,6 +45,7 @@ export async function GET() {
       },
     });
   } catch (error) {
+      unstable_rethrow(error);
     console.error("[GET /api/auth/me]", error);
 
     return NextResponse.json(

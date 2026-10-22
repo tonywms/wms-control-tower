@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import {
+  ArrowLeft,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -18,6 +19,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { usePermissions } from "@/components/auth/usePermissions";
 
 type Etapa = {
@@ -423,6 +425,14 @@ export default function EtapasPage() {
     <main className="min-h-screen bg-[#070b12] text-white">
       <div className="mx-auto max-w-[1500px] px-6 py-8 lg:px-10">
         <header className="mb-8">
+          <Link
+            href="/"
+            className="mb-5 inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-cyan-300"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Voltar para Control Tower
+          </Link>
+
           <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
             <div>
               <div className="mb-3 flex items-center gap-3">

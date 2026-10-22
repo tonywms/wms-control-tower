@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/auth/permissions";
 
@@ -34,17 +35,17 @@ export async function GET(request: NextRequest) {
     const { data: usuarios, error } = await query;
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      console.error("[API /api/usuarios] Erro do banco de dados:", error);
+      return NextResponse.json({ success: false, error: "Não foi possível processar os usuários." }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, total: usuarios?.length ?? 0, usuarios: usuarios ?? [] });
   } catch (error) {
+    unstable_rethrow(error);
+    console.error("[API /api/usuarios GET] Erro inesperado:", error);
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Erro ao buscar usuários.",
-      },
-      { status: 500 }
+      { success: false, error: "Erro ao buscar usuários." },
+      { status: 500 },
     );
   }
 }
@@ -88,17 +89,17 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      console.error("[API /api/usuarios] Erro do banco de dados:", error);
+      return NextResponse.json({ success: false, error: "Não foi possível processar os usuários." }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, message: "Usuário cadastrado com sucesso.", usuario }, { status: 201 });
   } catch (error) {
+    unstable_rethrow(error);
+    console.error("[API /api/usuarios POST] Erro inesperado:", error);
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Erro ao cadastrar usuário.",
-      },
-      { status: 500 }
+      { success: false, error: "Erro ao cadastrar usuário." },
+      { status: 500 },
     );
   }
 }

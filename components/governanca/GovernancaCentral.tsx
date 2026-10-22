@@ -2,8 +2,6 @@
 
 import {
   AlertTriangle,
-  Ban,
-  CalendarClock,
   CheckCircle2,
   ChevronRight,
   CircleAlert,

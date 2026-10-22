@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Trash2,
   UserRound,
+  X,
 } from "lucide-react";
 import PendenciaModal, { type Pendencia } from "./PendenciaModal";
 
@@ -64,6 +65,7 @@ export default function ProjetoPendencias({ projetoId, onChanged }: Props) {
   const [erro, setErro] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editando, setEditando] = useState<Pendencia | null>(null);
+  const [pendenciaParaExcluir, setPendenciaParaExcluir] = useState<Pendencia | null>(null);
   const [excluindoId, setExcluindoId] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
@@ -126,11 +128,6 @@ export default function ProjetoPendencias({ projetoId, onChanged }: Props) {
   }, [pendencias]);
 
   async function excluir(item: Pendencia) {
-    const confirmar = window.confirm(
-      `Excluir a pendência "${item.titulo}"? Esta ação não poderá ser desfeita.`,
-    );
-    if (!confirmar) return;
-
     try {
       setExcluindoId(item.id);
       setErro("");
@@ -149,6 +146,7 @@ export default function ProjetoPendencias({ projetoId, onChanged }: Props) {
         throw new Error(result.error || "Não foi possível excluir a pendência.");
       }
 
+      setPendenciaParaExcluir(null);
       await carregar();
     } catch (error) {
       setErro(
@@ -313,7 +311,7 @@ export default function ProjetoPendencias({ projetoId, onChanged }: Props) {
                       <button
                         type="button"
                         disabled={excluindoId === item.id}
-                        onClick={() => void excluir(item)}
+                        onClick={() => setPendenciaParaExcluir(item)}
                         className="rounded-lg p-2 text-slate-500 transition hover:bg-rose-500/10 hover:text-rose-300 disabled:opacity-40"
                         title="Excluir pendência"
                       >
@@ -331,6 +329,113 @@ export default function ProjetoPendencias({ projetoId, onChanged }: Props) {
           </div>
         )}
       </section>
+
+      {pendenciaParaExcluir && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              excluindoId !== pendenciaParaExcluir.id
+            ) {
+              setPendenciaParaExcluir(null);
+            }
+          }}
+        >
+          <div className="w-full max-w-[520px] overflow-hidden rounded-[26px] border border-fuchsia-400/60 bg-[#0a1235] shadow-[0_30px_100px_rgba(0,0,0,0.55)]">
+            <div className="flex items-start justify-between gap-4 border-b border-white/[0.08] bg-gradient-to-r from-sky-400/[0.08] via-indigo-400/[0.06] to-fuchsia-500/[0.08] px-6 py-5">
+              <div className="flex min-w-0 items-start gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-rose-400/30 bg-rose-500/10 text-rose-300">
+                  <Trash2 size={21} />
+                </div>
+
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-rose-300/80">
+                    Control Tower • Projeto 360
+                  </div>
+                  <h3 className="mt-1 text-xl font-bold text-white">
+                    Excluir pendência
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Confirme a exclusão permanente desta pendência.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setPendenciaParaExcluir(null)}
+                disabled={excluindoId === pendenciaParaExcluir.id}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-500 transition hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Fechar confirmação de exclusão"
+              >
+                <X size={19} />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-6 py-6">
+              <div className="rounded-2xl border border-white/[0.07] bg-black/20 p-4">
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                  Pendência selecionada
+                </div>
+                <div className="mt-2 break-words text-base font-bold text-white">
+                  {pendenciaParaExcluir.titulo}
+                </div>
+                {pendenciaParaExcluir.descricao && (
+                  <p className="mt-2 break-words text-sm leading-6 text-slate-400">
+                    {pendenciaParaExcluir.descricao}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-start gap-3 rounded-2xl border border-amber-400/50 bg-amber-400/[0.08] p-4">
+                <AlertTriangle
+                  size={19}
+                  className="mt-0.5 shrink-0 text-amber-300"
+                />
+                <div>
+                  <div className="text-sm font-bold text-amber-200">
+                    Esta ação não poderá ser desfeita.
+                  </div>
+                  <p className="mt-1 text-sm leading-5 text-slate-400">
+                    A pendência será removida do projeto após a confirmação da API.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-white/[0.08] px-6 py-4">
+              <button
+                type="button"
+                onClick={() => setPendenciaParaExcluir(null)}
+                disabled={excluindoId === pendenciaParaExcluir.id}
+                className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-5 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void excluir(pendenciaParaExcluir)}
+                disabled={excluindoId === pendenciaParaExcluir.id}
+                className="flex min-w-[160px] items-center justify-center gap-2 rounded-xl bg-rose-500 px-5 py-3 text-sm font-bold text-white shadow-[0_10px_30px_rgba(244,63,94,0.20)] transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {excluindoId === pendenciaParaExcluir.id ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Excluindo...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    Excluir pendência
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <PendenciaModal
         projetoId={projetoId}

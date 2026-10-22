@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requirePermission } from "@/lib/auth/permissions";
@@ -34,6 +35,7 @@ export async function GET() {
 
     return NextResponse.json({ success: true, atualizado_em: new Date().toISOString(), acoes: data ?? [] });
   } catch (error) {
+      unstable_rethrow(error);
     console.error("[GET agenda executiva]", error);
     return NextResponse.json({
       success: false,

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 type Projeto = {
@@ -219,6 +220,7 @@ export async function GET() {
       },
     );
   } catch (error) {
+      unstable_rethrow(error);
     console.error(
       "[API /api/projetos]",
       error,

@@ -209,6 +209,15 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     carregar();
   }, [carregar]);
 
+  const abrirCockpit = useCallback((item: ProjetoPriorizado) => {
+    setSucessoDecisao("");
+    setCockpit(item);
+    setSimPrazo(item.projeto.data_fim ?? "");
+    setSimPrioridade(item.projeto.prioridade);
+    setSimResolverRiscos(false);
+    setSimResponsavelId(item.projeto.responsavel?.id ?? "");
+  }, []);
+
   useEffect(() => {
     function abrirCockpitExterno(event: Event) {
       const customEvent = event as CustomEvent<{
@@ -238,7 +247,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
         abrirCockpitExterno,
       );
     };
-  }, [projetos]);
+  }, [abrirCockpit, projetos]);
 
   const priorizados = useMemo(
     () =>
@@ -272,7 +281,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
       .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
   }, [projetos]);
 
-  const calcularCargaResponsavel = (
+  const calcularCargaResponsavel = useCallback((
     responsavelId: string | null | undefined,
     excluirProjetoId?: string,
     incluirProjeto?: Projeto,
@@ -326,7 +335,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
             : "Disponível";
 
     return { ativos, atencao, criticos, atrasados, bloqueados, riscos, scoreCarga, nivel };
-  };
+  }, [projetos]);
 
 
   const top = priorizados.slice(0, 8);
@@ -334,14 +343,6 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
     ? Math.round(priorizados.reduce((acc, item) => acc + item.score, 0) / priorizados.length)
     : 0;
 
-  const abrirCockpit = (item: ProjetoPriorizado) => {
-    setSucessoDecisao("");
-    setCockpit(item);
-    setSimPrazo(item.projeto.data_fim ?? "");
-    setSimPrioridade(item.projeto.prioridade);
-    setSimResolverRiscos(false);
-    setSimResponsavelId(item.projeto.responsavel?.id ?? "");
-  };
 
   const sincronizarCockpitAposDecisao = useCallback(
     async (projetoId: string, mensagem: string) => {
@@ -461,7 +462,7 @@ export default function MatrizPriorizacao({ onOpenProjeto }: Props) {
       origemNome: cockpit.projeto.responsavel?.nome ?? "Sem responsável",
       destinoNome: simulacao.projeto.responsavel?.nome ?? "Sem responsável",
     };
-  }, [cockpit, simulacao, simResponsavelId, simPrazo, projetos]);
+  }, [cockpit, simulacao, simResponsavelId, simPrazo, calcularCargaResponsavel]);
 
 
   const aplicarRedistribuicao = useCallback(async () => {

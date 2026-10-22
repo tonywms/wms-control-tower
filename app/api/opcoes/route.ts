@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
@@ -48,6 +49,7 @@ export async function GET() {
       responsaveis: usuariosResult.data ?? [],
     });
   } catch (error) {
+      unstable_rethrow(error);
     console.error("Erro ao carregar opções:", error);
 
     return NextResponse.json(

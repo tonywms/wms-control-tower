@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Trash2,
   UserRound,
+  X,
 } from "lucide-react";
 import AcaoModal, { type AcaoProjeto } from "./AcaoModal";
 
@@ -51,6 +52,8 @@ export default function ProjetoAcoes({ projetoId, onChanged }: Props) {
   const [open, setOpen] = useState(false);
   const [editando, setEditando] = useState<AcaoProjeto | null>(null);
   const [concluindoId, setConcluindoId] = useState<string | null>(null);
+  const [excluindoId, setExcluindoId] = useState<string | null>(null);
+  const [acaoParaExcluir, setAcaoParaExcluir] = useState<AcaoProjeto | null>(null);
 
   const carregar = useCallback(async () => {
     try {
@@ -145,19 +148,26 @@ export default function ProjetoAcoes({ projetoId, onChanged }: Props) {
   }
 
   async function excluir(a: AcaoProjeto) {
-    if (!confirm(`Excluir a ação "${a.titulo}"?`)) return;
+    try {
+      setExcluindoId(a.id);
+      setErro("");
 
-    const r = await fetch(`/api/projetos/${projetoId}/acoes/${a.id}`, {
-      method: "DELETE",
-    });
-    const j = await r.json();
+      const r = await fetch(`/api/projetos/${projetoId}/acoes/${a.id}`, {
+        method: "DELETE",
+      });
+      const j = await r.json();
 
-    if (!r.ok || !j.success) {
-      setErro(j.error || "Erro ao excluir.");
-      return;
+      if (!r.ok || !j.success) {
+        throw new Error(j.error || "Não foi possível excluir a ação.");
+      }
+
+      setAcaoParaExcluir(null);
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro inesperado ao excluir ação.");
+    } finally {
+      setExcluindoId(null);
     }
-
-    await carregar();
   }
 
   return (
@@ -337,7 +347,7 @@ export default function ProjetoAcoes({ projetoId, onChanged }: Props) {
                       </button>
                       <button
                         type="button"
-                        onClick={() => void excluir(a)}
+                        onClick={() => setAcaoParaExcluir(a)}
                         className="rounded-lg p-2 text-slate-500 transition hover:bg-rose-500/[.08] hover:text-rose-300"
                         title="Excluir ação"
                       >
@@ -351,6 +361,111 @@ export default function ProjetoAcoes({ projetoId, onChanged }: Props) {
           </div>
         )}
       </section>
+
+      {acaoParaExcluir && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-[#020617]/80 p-4 backdrop-blur-md"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !excluindoId) {
+              setAcaoParaExcluir(null);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="titulo-excluir-acao"
+            className="w-full max-w-[520px] overflow-hidden rounded-[26px] border border-rose-400/30 bg-gradient-to-b from-[#172554] via-[#101a42] to-[#080d25] shadow-[0_30px_100px_rgba(0,0,0,.65),0_0_60px_rgba(244,63,94,.10)]"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-white/[0.08] px-6 py-5">
+              <div className="flex min-w-0 items-start gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-rose-400/30 bg-rose-500/10 text-rose-300">
+                  <Trash2 size={20} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-rose-300/80">
+                    Control Tower • Projeto 360
+                  </div>
+                  <h3 id="titulo-excluir-acao" className="mt-1 text-xl font-bold text-white">
+                    Excluir ação
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Confirme a exclusão permanente desta ação.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setAcaoParaExcluir(null)}
+                disabled={!!excluindoId}
+                className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-2.5 text-slate-500 transition hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Fechar confirmação"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="px-6 py-6">
+              <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-4">
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                  Ação selecionada
+                </div>
+                <div className="mt-2 break-words text-base font-semibold text-white">
+                  {acaoParaExcluir.titulo}
+                </div>
+                {acaoParaExcluir.descricao && (
+                  <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-500">
+                    {acaoParaExcluir.descricao}
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-400/20 bg-amber-500/[0.07] p-4">
+                <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-300" />
+                <div>
+                  <div className="text-sm font-semibold text-amber-200">
+                    Esta ação não poderá ser desfeita.
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">
+                    A ação será removida do plano de ação executivo após a confirmação da API.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-white/[0.08] bg-black/10 px-6 py-4">
+              <button
+                type="button"
+                onClick={() => setAcaoParaExcluir(null)}
+                disabled={!!excluindoId}
+                className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-5 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void excluir(acaoParaExcluir)}
+                disabled={!!excluindoId}
+                className="flex min-w-[150px] items-center justify-center gap-2 rounded-xl border border-rose-300/20 bg-rose-500 px-5 py-3 text-sm font-bold text-white shadow-[0_0_30px_rgba(244,63,94,.18)] transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {excluindoId === acaoParaExcluir.id ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Excluindo...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    Excluir ação
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <AcaoModal
         projetoId={projetoId}

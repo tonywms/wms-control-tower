@@ -45,7 +45,9 @@ export default function AgendaExecutiva({ onOpenProjeto }: Props) {
 
   const carregar = useCallback(async (silencioso = false) => {
     try {
-      silencioso ? setRefreshing(true) : setLoading(true); setError("");
+      if (silencioso) setRefreshing(true);
+      else setLoading(true);
+      setError("");
       const r = await fetch("/api/agenda/executiva", { cache: "no-store" });
       const j = await r.json();
       if (!r.ok || !j?.success) throw new Error(j?.error || "Não foi possível carregar a agenda.");

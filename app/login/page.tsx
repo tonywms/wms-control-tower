@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
@@ -16,6 +17,7 @@ import { createClient } from "@/lib/supabase/client";
 type Modo = "login" | "recuperar";
 
 export default function LoginPage() {
+  const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
   const [modo, setModo] = useState<Modo>("login");
@@ -102,7 +104,7 @@ export default function LoginPage() {
         );
       }
 
-      window.location.assign("/");
+      router.replace("/");
     } catch (err) {
       setError(
         err instanceof Error

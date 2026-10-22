@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/auth/permissions";
 
@@ -286,14 +287,10 @@ export async function GET() {
       porEtapa,
     });
   } catch (error) {
+    unstable_rethrow(error);
+    console.error("[API /api/dashboard/executivo] Erro inesperado:", error);
     return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Erro ao montar dashboard executivo.",
-      },
+      { success: false, error: "Erro ao montar dashboard executivo." },
       { status: 500 },
     );
   }

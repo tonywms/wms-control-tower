@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { usePermissions } from "@/components/auth/usePermissions";
 
 type Cliente = {
@@ -429,13 +430,13 @@ export default function ClientesPage() {
               visualizar o cadastro de clientes.
             </p>
 
-            <a
+            <Link
               href="/"
               className="mt-6 inline-flex h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 text-xs font-medium text-slate-300 transition hover:bg-white/[0.07]"
             >
               <ChevronLeft size={15} />
               Voltar ao Control Tower
-            </a>
+            </Link>
           </div>
         </div>
       </div>
@@ -452,13 +453,13 @@ export default function ClientesPage() {
       <div className="relative mx-auto w-full max-w-[1500px] px-5 py-6 sm:px-8 lg:px-10">
         <header className="flex flex-col gap-5 border-b border-white/[0.06] pb-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <a
+            <Link
               href="/"
               className="mb-4 inline-flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-600 transition hover:text-slate-300"
             >
               <ChevronLeft size={13} />
               Control Tower
-            </a>
+            </Link>
 
             <div className="flex items-start gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-sky-400/10 bg-sky-400/[0.06] text-sky-300">

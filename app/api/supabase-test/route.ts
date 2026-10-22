@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
@@ -11,12 +12,10 @@ export async function GET() {
       .limit(1);
 
     if (error && error.code !== "42P01") {
+      console.error("[API /api/supabase-test] Falha na consulta de conexão:", error);
       return NextResponse.json(
-        {
-          connected: false,
-          error: error.message,
-        },
-        { status: 500 }
+        { connected: false, error: "Não foi possível validar a conexão com o banco de dados." },
+        { status: 500 },
       );
     }
 
@@ -26,15 +25,11 @@ export async function GET() {
       tableExists: error?.code !== "42P01",
     });
   } catch (error) {
+    unstable_rethrow(error);
+    console.error("[API /api/supabase-test] Erro inesperado:", error);
     return NextResponse.json(
-      {
-        connected: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Erro desconhecido ao conectar ao Supabase.",
-      },
-      { status: 500 }
+      { connected: false, error: "Não foi possível validar a conexão com o banco de dados." },
+      { status: 500 },
     );
   }
 }

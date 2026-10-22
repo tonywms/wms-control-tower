@@ -2,6 +2,7 @@
 
 import { LogOut, ShieldCheck, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 type Usuario = {
@@ -25,6 +26,7 @@ function initials(nome: string) {
 }
 
 export default function AuthUserMenu() {
+  const router = useRouter();
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -54,7 +56,7 @@ export default function AuthUserMenu() {
       setLoading(true);
       const supabase = createClient();
       await supabase.auth.signOut();
-      window.location.assign("/login");
+      router.replace("/login");
     } finally {
       setLoading(false);
     }

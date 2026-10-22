@@ -215,13 +215,17 @@ export default function Projeto360Modal({
 
   const [marcosProjeto, setMarcosProjeto] = useState<Marco[]>([]);
   const [acoesProjeto, setAcoesProjeto] = useState<AcaoProjeto[]>([]);
+  const [agoraReferencia, setAgoraReferencia] = useState(0);
 
   useEffect(() => {
     if (!open || !projeto) {
       return;
     }
 
+    setAgoraReferencia(Date.now());
+
     let cancelado = false;
+    const projetoAtual = projeto;
 
     async function carregar() {
       try {
@@ -229,7 +233,7 @@ export default function Projeto360Modal({
         setErroHistorico("");
 
         const response = await fetch(
-          `/api/projetos/${projeto.id}/historico`,
+          `/api/projetos/${projetoAtual.id}/historico`,
           {
             cache: "no-store",
             credentials: "same-origin",
@@ -337,7 +341,7 @@ export default function Projeto360Modal({
     if (!item.prazo) return false;
 
     const prazo = new Date(`${item.prazo}T23:59:59`);
-    return prazo.getTime() < Date.now();
+    return agoraReferencia > 0 && prazo.getTime() < agoraReferencia;
   };
 
   const impedimentoCritico = pendenciasAbertas.some(
@@ -364,7 +368,7 @@ export default function Projeto360Modal({
     }
 
     const prazo = new Date(`${item.data_prevista}T23:59:59`);
-    return prazo.getTime() < Date.now();
+    return agoraReferencia > 0 && prazo.getTime() < agoraReferencia;
   };
 
   const marcoAtrasado = marcosProjeto.some(marcoEstaAtrasado);
@@ -376,7 +380,7 @@ export default function Projeto360Modal({
     }
 
     const prazo = new Date(`${item.prazo}T23:59:59`);
-    return prazo.getTime() < Date.now();
+    return agoraReferencia > 0 && prazo.getTime() < agoraReferencia;
   };
 
   const acaoVencida = acoesProjeto.some(acaoEstaVencida);

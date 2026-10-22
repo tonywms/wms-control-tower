@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { requirePermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -64,10 +65,27 @@ export async function GET() {
     }
 
     inconsistencias.sort((a,b) => (a.severidade === b.severidade ? a.projeto_nome.localeCompare(b.projeto_nome,"pt-BR") : a.severidade === "Crítico" ? -1 : 1));
-    const porCategoria = Array.from(inconsistencias.reduce((m:Map<string,number>,x:any)=>m.set(x.categoria,(m.get(x.categoria)??0)+1),new Map())).map(([categoria,total])=>({categoria,total})).sort((a:any,b:any)=>b.total-a.total);
+    const contagemPorCategoria = inconsistencias.reduce<Map<string, number>>(
+  (mapa, item) => {
+    mapa.set(
+      item.categoria,
+      (mapa.get(item.categoria) ?? 0) + 1
+    );
+    return mapa;
+  },
+  new Map<string, number>()
+);
+
+const porCategoria = Array.from(contagemPorCategoria.entries())
+  .map(([categoria, total]) => ({
+    categoria,
+    total,
+  }))
+  .sort((a, b) => b.total - a.total);
 
     return NextResponse.json({ success:true, atualizadoEm:new Date().toISOString(), resumo:{ total:inconsistencias.length, criticos:inconsistencias.filter(x=>x.severidade==="Crítico").length, atencao:inconsistencias.filter(x=>x.severidade==="Atenção").length, projetosAfetados:new Set(inconsistencias.map(x=>x.projeto_id)).size, projetosAnalisados:projetos.length }, porCategoria, inconsistencias });
   } catch (error) {
+      unstable_rethrow(error);
     console.error("[GET /api/inconsistencias]", error);
     return NextResponse.json({ success:false, error:error instanceof Error ? error.message : "Erro interno ao analisar inconsistências." }, { status:500 });
   }

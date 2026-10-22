@@ -1,0 +1,230 @@
+﻿"use client";
+
+import {
+  AlertTriangle,
+  Archive,
+  ArrowUpRight,
+  BarChart3,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
+  RefreshCw,
+  ShieldAlert,
+  Target,
+  TrendingDown,
+  TrendingUp,
+  Minus,
+  UserRound,
+  Users,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+type Acao = {
+  id: string;
+  projeto_id: string;
+  titulo: string;
+  descricao: string | null;
+  prioridade: string;
+  status: string;
+  prazo: string | null;
+  responsavel_id: string | null;
+  responsavel?: { id: string; nome: string } | null;
+  projeto?: {
+    id: string;
+    nome: string;
+    setor: string | null;
+    status: string;
+    prioridade: string;
+  } | null;
+};
+
+type SemanaHistorico = {
+  id:string; inicio_semana:string; fim_semana:string; status_fechamento:"Parcial"|"Fechada";
+  planejadas:number; concluidas:number; pendentes:number; atrasadas:number;
+  percentual_execucao:number; percentual_risco:number; registrado_por_nome:string|null; registrado_em:string;
+  responsaveis?:ResponsavelHistorico[];
+};
+
+type ResponsavelHistorico = {
+  nome:string;
+  planejadas:number;
+  concluidas:number;
+  pendentes:number;
+  atrasadas:number;
+  percentual:number;
+};
+
+type Inconsistencia = {
+  id: string;
+  projeto_id: string;
+  projeto_nome: string;
+  severidade: "CrÃ­tico" | "AtenÃ§Ã£o";
+  titulo: string;
+};
+
+type Props = {
+  onOpenProjeto: (projetoId: string) => void | Promise<void>;
+};
+
+const FECHADAS = new Set(["ConcluÃ­da", "Cancelada"]);
+
+
+function iso(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function br(v: string | null) {
+  if (!v) return "Sem prazo";
+  const [a, m, d] = v.split("-");
+  return `${d}/${m}/${a}`;
+}
+
+function semanaUtil() {
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const dia = hoje.getDay();
+  const inicio = new Date(hoje);
+  if (dia === 0) inicio.setDate(hoje.getDate() + 1);
+  else if (dia === 6) inicio.setDate(hoje.getDate() + 2);
+  else inicio.setDate(hoje.getDate() - (dia - 1));
+  const fim = new Date(inicio);
+  fim.setDate(inicio.getDate() + 4);
+  return { inicio, fim, hoje };
+}
+
+function prioridadePeso(v: string) {
+  if (v === "CrÃ­tica") return 4;
+  if (v === "Alta") return 3;
+  if (v === "Normal") return 2;
+  return 1;
+}
+
+type ClassificacaoExecucao = "URGENTE" | "ALTA" | "ATENÃ‡ÃƒO" | "NORMAL";
+
+function classificarExecucao(a: Acao, hoje: string, inicio: string, fim: string, riscos: number): ClassificacaoExecucao {
+  const vencida = !!a.prazo && a.prazo < hoje;
+  const naSemana = !!a.prazo && a.prazo >= inicio && a.prazo <= fim;
+  if ((vencida && riscos > 0) || a.prioridade === "CrÃ­tica") return "URGENTE";
+  if (naSemana || a.prioridade === "Alta") return "ALTA";
+  if (!a.prazo) return "ATENÃ‡ÃƒO";
+  return "NORMAL";
+}
+
+function pesoClassificacao(v: ClassificacaoExecucao) {
+  return v === "URGENTE" ? 4 : v === "ALTA" ? 3 : v === "ATENÃ‡ÃƒO" ? 2 : 1;
+}
+
+function estiloClassificacao(v: ClassificacaoExecucao) {
+  if (v === "URGENTE") return { barra:"bg-red-400", badge:"border-red-400/15 bg-red-400/[.08] text-red-300" };
+  if (v === "ALTA") return { barra:"bg-amber-400", badge:"border-amber-400/15 bg-amber-400/[.08] text-amber-300" };
+  if (v === "ATENÃ‡ÃƒO") return { barra:"bg-violet-400", badge:"border-violet-400/15 bg-violet-400/[.08] text-violet-300" };
+  return { barra:"bg-sky-400", badge:"border-sky-400/15 bg-sky-400/[.08] text-sky-300" };
+}
+
+export default function PlanejamentoSemanal({ onOpenProjeto }: Props) {
+  const [acoes, setAcoes] = useState<Acao[]>([]);
+  const [inconsistencias, setInconsistencias] = useState<Inconsistencia[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState("");
+  const [sucesso, setSucesso] = useState("");
+  const [concluindo, setConcluindo] = useState<string | null>(null);
+  const [historico, setHistorico] = useState<SemanaHistorico[]>([]);
+  const [registrandoSemana, setRegistrandoSemana] = useState(false);
+  const [filtro, setFiltro] = useState<"Todos" | "Semana" | "Vencidos" | "Sem prazo">("Todos");
+
+  const carregar = useCallback(async () => {
+    try {
+      setLoading(true);
+      setErro("");
+      const [a, i, h] = await Promise.all([
+        fetch("/api/agenda/executiva", { cache: "no-store" }),
+        fetch("/api/inconsistencias", { cache: "no-store" }),
+        fetch("/api/plano-semana/historico", { cache: "no-store" }),
+      ]);
+      const [aj, ij, hj] = await Promise.all([a.json(), i.json(), h.json()]);
+      if (!a.ok || !aj?.success) throw new Error(aj?.error || "Erro ao carregar aÃ§Ãµes.");
+      if (!i.ok || !ij?.success) throw new Error(ij?.error || "Erro ao carregar riscos da semana.");
+      if (!h.ok || !hj?.success) throw new Error(hj?.error || "Erro ao carregar histÃ³rico semanal.");
+      setAcoes(aj.acoes ?? []);
+      setInconsistencias(ij.inconsistencias ?? []);
+      setHistorico(hj.semanas ?? []);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao montar o plano da semana.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void carregar(); }, [carregar]);
+
+  async function concluirAcao(a: Acao) {
+    try {
+      setConcluindo(a.id);
+      setErro("");
+      setSucesso("");
+
+      const r = await fetch(`/api/projetos/${a.projeto_id}/acoes/${a.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "ConcluÃ­da" }),
+      });
+
+      const j = await r.json();
+      if (!r.ok || !j?.success) {
+        throw new Error(j?.error || "NÃ£o foi possÃ­vel concluir a aÃ§Ã£o.");
+      }
+
+      setSucesso(`AÃ§Ã£o "${a.titulo}" concluÃ­da com sucesso.`);
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao concluir aÃ§Ã£o.");
+    } finally {
+      setConcluindo(null);
+    }
+  }
+
+  const { inicio, fim, hoje } = useMemo(() => semanaUtil(), []);
+  const inicioIso = iso(inicio);
+  const fimIso = iso(fim);
+  const hojeIso = iso(hoje);
+
+  async function registrarSemana() {
+    try {
+      setRegistrandoSemana(true); setErro(""); setSucesso("");
+      const r=await fetch("/api/plano-semana/historico",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({inicio:inicioIso,fim:fimIso})});
+      const j=await r.json();
+      if(!r.ok||!j?.success) throw new Error(j?.error||"NÃ£o foi possÃ­vel registrar a semana.");
+      setSucesso(j.message||"Semana registrada no histÃ³rico.");
+      await carregar();
+    } catch(e) {
+      setErro(e instanceof Error?e.message:"Erro ao registrar semana.");
+    } finally { setRegistrandoSemana(false); }
+  }
+
+  const abertas = useMemo(() => acoes.filter((a) => !FECHADAS.has(a.status)), [acoes]);
+  const vencidas = useMemo(() => abertas.filter((a) => a.prazo && a.prazo < hojeIso), [abertas, hojeIso]);
+  const daSemana = useMemo(() => abertas.filter((a) => a.prazo && a.prazo >= inicioIso && a.prazo <= fimIso), [abertas, inicioIso, fimIso]);
+  const semPrazo = useMemo(() => abertas.filter((a) => !a.prazo), [abertas]);
+  const criticas = useMemo(() => abertas.filter((a) => a.prioridade === "CrÃ­tica"), [abertas]);
+
+  // ExecuÃ§Ã£o semanal usa TODAS as aÃ§Ãµes com prazo dentro da janela,
+  // inclusive as jÃ¡ concluÃ­das. Assim uma conclusÃ£o nÃ£o apaga o planejado da semana.
+  const planejadasSemana = useMemo(
+    () => acoes.filter((a) => a.prazo && a.prazo >= inicioIso && a.prazo <= fimIso && a.status !== "Cancelada"),
+    [acoes, inicioIso, fimIso],
+  );
+  const concluidasSemana = useMemo(
+    () => planejadasSemana.filter((a) => a.status === "ConcluÃ­da"),
+    [planejadasSemana],
+  );
+  const pendentesSemana = useMemo(
+    () => planejadasSemana.filter((a) => !FECHADAS.has(a.status)),
+    [planejadasSemana],
+  );
+  const atrasadasSemana = useMemo(
+    () => pendentesSemana.filter((a) => a.prazo && a.prazo < hojeIso),
+    [pendentesSemana, hojeIso],
+  );
+  const percentualExecucao = planejadasSemana.length

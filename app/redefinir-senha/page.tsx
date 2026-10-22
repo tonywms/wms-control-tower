@@ -17,8 +17,10 @@ import {
 } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 
 export default function RedefinirSenhaPage() {
+  const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
   const [password, setPassword] = useState("");
@@ -163,9 +165,7 @@ export default function RedefinirSenhaPage() {
       await supabase.auth.signOut();
 
       window.setTimeout(() => {
-        window.location.assign(
-          "/login?senha=alterada",
-        );
+        router.replace("/login?senha=alterada");
       }, 1200);
     } catch (err) {
       console.error(
@@ -234,7 +234,7 @@ export default function RedefinirSenhaPage() {
               <button
                 type="button"
                 onClick={() =>
-                  window.location.assign("/login")
+                  router.replace("/login")
                 }
                 className="mt-5 flex h-11 w-full items-center justify-center rounded-xl bg-sky-500 px-4 text-sm font-semibold text-slate-950 transition hover:bg-sky-400"
               >

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   X,
   Save,
@@ -192,7 +192,7 @@ export default function ProjetoModal({
     carregarOpcoes();
   }, [open]);
 
-  async function carregarHistorico() {
+  const carregarHistorico = useCallback(async () => {
     if (!projeto) return;
 
     try {
@@ -218,12 +218,12 @@ export default function ProjetoModal({
     } finally {
       setHistoricoLoading(false);
     }
-  }
+  }, [projeto]);
 
   useEffect(() => {
     if (!open || !projeto || aba !== "historico") return;
     void carregarHistorico();
-  }, [open, projeto, aba]);
+  }, [open, projeto, aba, carregarHistorico]);
 
   if (!open || !projeto) {
     return null;
@@ -320,6 +320,9 @@ export default function ProjetoModal({
    */
 
   async function salvar() {
+    if (!projeto) return;
+    const projetoAtual = projeto;
+
     try {
       setSaving(true);
       setError("");
@@ -391,14 +394,14 @@ export default function ProjetoModal({
       console.log(
         "[ProjetoModal] Salvando projeto:",
         {
-          projeto_id: projeto.id,
+          projeto_id: projetoAtual.id,
           etapa_id: payload.etapa_id,
           fase_origem: payload.fase_origem,
         },
       );
 
       const response = await fetch(
-        `/api/projetos/${projeto.id}`,
+        `/api/projetos/${projetoAtual.id}`,
         {
           method: "PUT",
           headers: {

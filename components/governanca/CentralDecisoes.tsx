@@ -356,6 +356,11 @@ export default function CentralDecisoes({ onOpenProjeto }: Props) {
   const [justificativaReavaliacao, setJustificativaReavaliacao] = useState("");
   const [salvandoReavaliacao, setSalvandoReavaliacao] = useState(false);
   const [erroReavaliacao, setErroReavaliacao] = useState("");
+  const [agoraReferencia, setAgoraReferencia] = useState(0);
+
+  useEffect(() => {
+    setAgoraReferencia(Date.now());
+  }, []);
 
   const carregar = useCallback(async () => {
     try {
@@ -416,7 +421,7 @@ export default function CentralDecisoes({ onOpenProjeto }: Props) {
     void carregar();
   }, [carregar]);
 
-  const decisoesComResultadoReal = useMemo(() => {
+  const decisoesComResultadoReal = useMemo<Decisao[]>(() => {
     const mapaProjetos = new Map(
       projetosAtuais.map((projeto) => [
         projeto.id,
@@ -672,7 +677,7 @@ export default function CentralDecisoes({ onOpenProjeto }: Props) {
   }, [decisoesComResultadoReal]);
 
   const resumo = useMemo(() => {
-    const agora = Date.now();
+    const agora = agoraReferencia;
     const seteDias = 7 * 24 * 60 * 60 * 1000;
 
     return {
@@ -697,7 +702,7 @@ export default function CentralDecisoes({ onOpenProjeto }: Props) {
         return Math.round((eficazes / medidos.length) * 100);
       })(),
     };
-  }, [decisoes, decisoesComResultadoReal]);
+  }, [agoraReferencia, decisoes, decisoesComResultadoReal]);
 
   const resumoAcompanhamento = useMemo(() => {
     const encerrados = acompanhamentos.filter((item) => item.acao === "encerrar");
@@ -726,12 +731,7 @@ export default function CentralDecisoes({ onOpenProjeto }: Props) {
           : null;
       })
       .filter(
-        (
-          item,
-        ): item is {
-          decisao: Decisao;
-          acompanhamento: AcompanhamentoGerencial;
-        } => Boolean(item),
+        (item): item is NonNullable<typeof item> => item !== null,
       )
       .sort(
         (a, b) =>

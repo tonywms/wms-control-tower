@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/auth/permissions";
 
@@ -49,17 +50,17 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       .single();
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      console.error("[API /api/usuarios/[id] PUT] Erro do banco de dados:", error);
+      return NextResponse.json({ success: false, error: "Não foi possível atualizar o usuário." }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, message: "Usuário atualizado com sucesso.", usuario });
   } catch (error) {
+    unstable_rethrow(error);
+    console.error("[API /api/usuarios/[id] PUT] Erro inesperado:", error);
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Erro ao atualizar usuário.",
-      },
-      { status: 500 }
+      { success: false, error: "Erro ao atualizar usuário." },
+      { status: 500 },
     );
   }
 }

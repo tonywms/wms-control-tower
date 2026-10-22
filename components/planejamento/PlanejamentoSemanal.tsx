@@ -17,6 +17,7 @@ import {
   TrendingUp,
   Minus,
   UserRound,
+  Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -69,10 +70,6 @@ type Props = {
 
 const FECHADAS = new Set(["Concluída", "Cancelada"]);
 
-function localDate(v: string) {
-  const [a, m, d] = v.split("-").map(Number);
-  return new Date(a, m - 1, d);
-}
 
 function iso(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -506,6 +503,83 @@ export default function PlanejamentoSemanal({ onOpenProjeto }: Props) {
     return { pendentes, dias, ritmoAtual, ritmoNecessario, gapDiario, metaDiaria, capacidadeProjetada, recuperacaoNecessaria, responsaveis, acoesPrioritarias, nivel };
   }, [pendentesSemana, forecastSemanal, desempenhoResponsavel, riscoPorProjeto, hojeIso]);
 
+  const radarCapacidade = useMemo(() => {
+    const responsaveis = desempenhoResponsavel.map((r) => {
+      const abertasResponsavel = abertas.filter((a) => (a.responsavel?.nome || "Sem responsável") === r.nome);
+      const semPrazo = abertasResponsavel.filter((a) => !a.prazo).length;
+      const criticas = abertasResponsavel.filter((a) => String(a.prioridade || "").toLowerCase() === "crítica").length;
+      const riscosCriticos = abertasResponsavel.reduce((n,a)=>n+(riscoPorProjeto.get(a.projeto_id)?.criticos ?? 0),0);
+      const carga = abertasResponsavel.length;
+      const pressao = carga*2 + r.atrasadas*4 + semPrazo*2 + criticas*4 + riscosCriticos*2;
+      const nivel = pressao>=24 ? "Crítica" : pressao>=14 ? "Alta" : pressao>=7 ? "Moderada" : "Controlada";
+      return {...r,carga,semPrazo,criticas,riscosCriticos,pressao,nivel};
+    }).sort((a,b)=>b.pressao-a.pressao || b.carga-a.carga);
+    const total=responsaveis.reduce((n,r)=>n+r.carga,0);
+    const concentracao=total>0?Math.round(((responsaveis[0]?.carga??0)/total)*100):0;
+    return {responsaveis,total,concentracao,sobrecarregados:responsaveis.filter(r=>r.nivel==="Crítica"||r.nivel==="Alta").length,zerados:responsaveis.filter(r=>r.carga>0&&r.percentual===0).length};
+  },[desempenhoResponsavel,abertas,riscoPorProjeto]);
+
+
+  const balanceamentoCapacidade = useMemo(() => {
+    const responsaveis = radarCapacidade.responsaveis;
+    const comCarga = responsaveis.filter((r) => r.carga > 0);
+
+    const origem = comCarga.find((r) => r.nivel === "Crítica")
+      ?? comCarga.find((r) => r.nivel === "Alta")
+      ?? comCarga[0]
+      ?? null;
+
+    const destinos = [...responsaveis]
+      .filter((r) => origem && r.nome !== origem.nome)
+      .sort((a, b) => a.pressao - b.pressao || a.carga - b.carga);
+
+    const destino = destinos[0] ?? null;
+
+    const acoesOrigem = origem
+      ? pendentesSemana
+          .filter((a) => (a.responsavel?.nome || "Sem responsável") === origem.nome)
+          .sort((a, b) => {
+            const ar = riscoPorProjeto.get(a.projeto_id)?.criticos ?? 0;
+            const brisco = riscoPorProjeto.get(b.projeto_id)?.criticos ?? 0;
+            if (ar !== brisco) return ar - brisco;
+            const av = a.prazo && a.prazo < hojeIso ? 1 : 0;
+            const bv = b.prazo && b.prazo < hojeIso ? 1 : 0;
+            if (av !== bv) return av - bv;
+            return prioridadePeso(a.prioridade) - prioridadePeso(b.prioridade);
+          })
+      : [];
+
+    const diferencaCarga = origem && destino ? Math.max(0, origem.carga - destino.carga) : 0;
+    const quantidadeSugerida = origem && destino
+      ? Math.min(acoesOrigem.length, Math.max(0, Math.floor(diferencaCarga / 2)))
+      : 0;
+
+    const sugestoes = acoesOrigem.slice(0, quantidadeSugerida);
+
+    const pressaoAntes = origem?.pressao ?? 0;
+    const reducaoEstimada = sugestoes.length * 2;
+    const pressaoDepois = Math.max(0, pressaoAntes - reducaoEstimada);
+
+    const situacao =
+      !origem || !destino
+        ? "Sem base suficiente"
+        : origem.nivel === "Crítica"
+          ? "Redistribuição recomendada"
+          : origem.nivel === "Alta"
+            ? "Balanceamento recomendado"
+            : "Distribuição controlada";
+
+    return {
+      origem,
+      destino,
+      sugestoes,
+      quantidadeSugerida,
+      pressaoAntes,
+      pressaoDepois,
+      situacao,
+    };
+  }, [radarCapacidade, pendentesSemana, riscoPorProjeto, hojeIso]);
+
   return (
     <div className="mt-5 space-y-4">
       <section className="rounded-3xl border border-sky-400/15 bg-gradient-to-br from-sky-400/[.07] via-white/[.025] to-violet-500/[.045] p-5 sm:p-6">
@@ -723,6 +797,186 @@ export default function PlanejamentoSemanal({ onOpenProjeto }: Props) {
           Ritmo atual: <b className="text-sky-300">{planoRecuperacao.ritmoAtual.toFixed(1)}/dia</b> · Ritmo necessário: <b className="text-violet-300">{planoRecuperacao.ritmoNecessario.toFixed(1)}/dia</b> · Gap: <b className={planoRecuperacao.gapDiario>0?"text-red-300":"text-emerald-300"}>{planoRecuperacao.gapDiario.toFixed(1)}/dia</b>
         </div>
       </section>
+
+      <section className="rounded-3xl border border-sky-400/15 bg-gradient-to-br from-sky-400/[.04] via-white/[.018] to-violet-400/[.04] p-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[.15em] text-sky-300"><Users size={13}/>Radar de capacidade</div>
+            <div className="mt-1 text-sm font-semibold text-white">Carga, pressão e gargalos por responsável</div>
+            <p className="mt-1 text-[10px] text-slate-500">Cruza ações abertas, atrasos, ausência de prazo, criticidade e riscos do projeto.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <MiniKpi label="Carga total" value={radarCapacidade.total} tone="sky"/>
+            <MiniKpi label="Concentração" value={`${radarCapacidade.concentracao}%`} tone="violet"/>
+            <MiniKpi label="Sob pressão" value={radarCapacidade.sobrecarregados} tone="amber"/>
+            <MiniKpi label="0% execução" value={radarCapacidade.zerados} tone="red"/>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 xl:grid-cols-2">
+          {radarCapacidade.responsaveis.map((r,index)=>{
+            const largura=Math.min(100,Math.max(4,r.pressao*3));
+            const cor=r.nivel==="Crítica"?"text-red-300":r.nivel==="Alta"?"text-amber-300":r.nivel==="Moderada"?"text-violet-300":"text-emerald-300";
+            const barra=r.nivel==="Crítica"?"bg-red-400":r.nivel==="Alta"?"bg-amber-400":r.nivel==="Moderada"?"bg-violet-400":"bg-emerald-400";
+            return <div key={`capacity-${r.nome}`} className="rounded-2xl border border-white/[.055] bg-black/15 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div><div className="text-[10px] font-semibold text-white">#{index+1} · {r.nome}</div><div className="mt-1 text-[8px] text-slate-600">{r.carga} aberta(s) · {r.atrasadas} atrasada(s) · {r.semPrazo} sem prazo</div></div>
+                <div className="text-right"><div className={`text-sm font-semibold ${cor}`}>{r.nivel}</div><div className="text-[7px] uppercase text-slate-600">pressão {r.pressao}</div></div>
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[.04]"><div className={`h-full rounded-full ${barra}`} style={{width:`${largura}%`}}/></div>
+              <div className="mt-3 grid grid-cols-4 gap-2">
+                <div><div className="text-[11px] font-semibold text-sky-300">{r.carga}</div><div className="text-[7px] uppercase text-slate-600">Abertas</div></div>
+                <div><div className="text-[11px] font-semibold text-red-300">{r.atrasadas}</div><div className="text-[7px] uppercase text-slate-600">Atrasadas</div></div>
+                <div><div className="text-[11px] font-semibold text-amber-300">{r.semPrazo}</div><div className="text-[7px] uppercase text-slate-600">Sem prazo</div></div>
+                <div><div className="text-[11px] font-semibold text-violet-300">{r.riscosCriticos}</div><div className="text-[7px] uppercase text-slate-600">Riscos</div></div>
+              </div>
+              <div className="mt-3 border-t border-white/[.04] pt-3 text-[8px] text-slate-600">Execução semanal <span className={r.percentual>=80?"text-emerald-300":r.percentual>=50?"text-amber-300":"text-red-300"}>{r.percentual}%</span> · {r.concluidas}/{r.planejadas} concluída(s)</div>
+            </div>;
+          })}
+        </div>
+        {radarCapacidade.responsaveis.length>0&&<div className="mt-4 rounded-2xl border border-white/[.05] bg-black/15 p-4 text-[9px] leading-5 text-slate-500">Maior carga: <b className="text-sky-300">{radarCapacidade.responsaveis[0].nome}</b> com <b className="text-violet-300">{radarCapacidade.concentracao}%</b> das ações abertas atribuídas. {radarCapacidade.sobrecarregados>0?<><b className="text-amber-300">{radarCapacidade.sobrecarregados}</b> responsável(is) estão em pressão alta ou crítica.</>:<>A distribuição não apresenta pressão alta ou crítica.</>}</div>}
+      </section>
+
+
+      <section className="rounded-3xl border border-violet-400/15 bg-gradient-to-br from-violet-400/[.045] via-white/[.018] to-cyan-400/[.04] p-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[.15em] text-violet-300">
+              <ArrowUpRight size={13}/>Balanceamento executivo
+            </div>
+            <div className="mt-1 text-sm font-semibold text-white">Sugestão de redistribuição da capacidade</div>
+            <p className="mt-1 text-[10px] text-slate-500">
+              Identifica concentração de carga e sugere quais ações podem ser redistribuídas sem alterar automaticamente nenhum responsável.
+            </p>
+          </div>
+
+          <div className={`min-w-[220px] rounded-2xl border px-4 py-3 ${
+            balanceamentoCapacidade.situacao === "Redistribuição recomendada"
+              ? "border-red-400/20 bg-red-400/[.06]"
+              : balanceamentoCapacidade.situacao === "Balanceamento recomendado"
+                ? "border-amber-400/20 bg-amber-400/[.06]"
+                : "border-emerald-400/20 bg-emerald-400/[.06]"
+          }`}>
+            <div className="text-[8px] font-semibold uppercase tracking-[.14em] text-slate-500">Diagnóstico</div>
+            <div className={`mt-1 text-sm font-semibold ${
+              balanceamentoCapacidade.situacao === "Redistribuição recomendada"
+                ? "text-red-300"
+                : balanceamentoCapacidade.situacao === "Balanceamento recomendado"
+                  ? "text-amber-300"
+                  : "text-emerald-300"
+            }`}>
+              {balanceamentoCapacidade.situacao}
+            </div>
+            <div className="mt-1 text-[8px] text-slate-500">
+              {balanceamentoCapacidade.quantidadeSugerida} ação(ões) sugerida(s) para redistribuição
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <MiniKpi label="Maior concentração" value={balanceamentoCapacidade.origem?.carga ?? 0} tone="red"/>
+          <MiniKpi label="Menor carga" value={balanceamentoCapacidade.destino?.carga ?? 0} tone="emerald"/>
+          <MiniKpi label="Redistribuir" value={balanceamentoCapacidade.quantidadeSugerida} tone="violet"/>
+          <MiniKpi label="Pressão projetada" value={balanceamentoCapacidade.pressaoDepois} tone="sky"/>
+        </div>
+
+        {balanceamentoCapacidade.origem && balanceamentoCapacidade.destino ? (
+          <div className="mt-4 grid gap-4 xl:grid-cols-[.75fr_1.25fr]">
+            <div className="rounded-2xl border border-white/[.055] bg-black/15 p-4">
+              <div className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-500">Movimento recomendado</div>
+
+              <div className="mt-4 rounded-xl border border-red-400/10 bg-red-400/[.03] p-3">
+                <div className="text-[8px] uppercase text-slate-600">Origem · maior pressão</div>
+                <div className="mt-1 flex items-center justify-between gap-3">
+                  <div className="text-xs font-semibold text-white">{balanceamentoCapacidade.origem.nome}</div>
+                  <div className="text-sm font-semibold text-red-300">P{balanceamentoCapacidade.pressaoAntes}</div>
+                </div>
+                <div className="mt-1 text-[8px] text-slate-500">
+                  {balanceamentoCapacidade.origem.carga} aberta(s) · {balanceamentoCapacidade.origem.atrasadas} atrasada(s)
+                </div>
+              </div>
+
+              <div className="my-2 flex justify-center text-violet-300">
+                <TrendingDown size={16}/>
+              </div>
+
+              <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[.03] p-3">
+                <div className="text-[8px] uppercase text-slate-600">Destino · menor pressão</div>
+                <div className="mt-1 flex items-center justify-between gap-3">
+                  <div className="text-xs font-semibold text-white">{balanceamentoCapacidade.destino.nome}</div>
+                  <div className="text-sm font-semibold text-emerald-300">P{balanceamentoCapacidade.destino.pressao}</div>
+                </div>
+                <div className="mt-1 text-[8px] text-slate-500">
+                  {balanceamentoCapacidade.destino.carga} aberta(s) · {balanceamentoCapacidade.destino.atrasadas} atrasada(s)
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-xl border border-violet-400/10 bg-violet-400/[.03] p-3 text-[9px] leading-4 text-slate-500">
+                Se as {balanceamentoCapacidade.quantidadeSugerida} ação(ões) sugeridas forem redistribuídas,
+                a pressão estimada de <b className="text-red-300">{balanceamentoCapacidade.origem.nome}</b> cai de{" "}
+                <b className="text-red-300">{balanceamentoCapacidade.pressaoAntes}</b> para aproximadamente{" "}
+                <b className="text-emerald-300">{balanceamentoCapacidade.pressaoDepois}</b>.
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/[.055] bg-black/15 p-4">
+              <div className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-500">Candidatas à redistribuição</div>
+              <div className="mt-1 text-[10px] text-slate-500">
+                O sistema prioriza ações não vencidas e com menor criticidade para reduzir risco de troca.
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {balanceamentoCapacidade.sugestoes.length === 0 ? (
+                  <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[.03] p-4 text-[9px] text-emerald-300">
+                    Não há redistribuição necessária com a carga atual.
+                  </div>
+                ) : (
+                  balanceamentoCapacidade.sugestoes.map((a, index) => {
+                    const riscos = riscoPorProjeto.get(a.projeto_id)?.criticos ?? 0;
+                    const vencida = !!a.prazo && a.prazo < hojeIso;
+                    return (
+                      <div key={`balance-${a.id}`} className="flex flex-col gap-3 rounded-xl border border-white/[.045] bg-white/[.018] p-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[8px] font-semibold text-slate-600">#{index + 1}</span>
+                            <span className="rounded border border-violet-400/15 bg-violet-400/[.06] px-1.5 py-0.5 text-[7px] font-semibold text-violet-300">CANDIDATA</span>
+                            {vencida && <span className="rounded border border-red-400/15 bg-red-400/[.06] px-1.5 py-0.5 text-[7px] font-semibold text-red-300">VENCIDA</span>}
+                            {riscos > 0 && <span className="rounded border border-red-400/15 bg-red-400/[.06] px-1.5 py-0.5 text-[7px] font-semibold text-red-300">{riscos} risco(s)</span>}
+                          </div>
+                          <div className="mt-1 truncate text-[10px] font-semibold text-white">{a.titulo}</div>
+                          <div className="mt-1 text-[8px] text-slate-600">
+                            {a.projeto?.nome || "Projeto"} · {a.responsavel?.nome || "Sem responsável"} · {br(a.prazo)}
+                          </div>
+                          <div className="mt-1 text-[8px] text-slate-500">
+                            Sugestão: <span className="text-emerald-300">{balanceamentoCapacidade.destino?.nome}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => void onOpenProjeto(a.projeto_id)}
+                          className="shrink-0 rounded-lg border border-sky-400/15 bg-sky-400/[.05] px-3 py-1.5 text-[9px] font-semibold text-sky-300"
+                        >
+                          360 <ChevronRight size={11} className="ml-1 inline"/>
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 rounded-2xl border border-dashed border-violet-400/15 bg-violet-400/[.025] p-5 text-[10px] text-slate-500">
+            Ainda não há responsáveis suficientes com carga para calcular uma redistribuição.
+          </div>
+        )}
+
+        <div className="mt-4 rounded-2xl border border-white/[.05] bg-black/15 p-4 text-[9px] leading-5 text-slate-500">
+          Este bloco é <b className="text-violet-300">recomendativo</b>: ele não altera responsáveis sozinho.
+          A decisão continua no fluxo oficial do projeto, evitando movimentações automáticas indevidas.
+        </div>
+      </section>
+
 
 <section className="rounded-3xl border border-white/[.06] bg-white/[.018] p-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -1024,8 +1278,8 @@ export default function PlanejamentoSemanal({ onOpenProjeto }: Props) {
   );
 }
 
-function MiniKpi({label,value,tone}:{label:string;value:number;tone:"sky"|"emerald"|"violet"|"red"}){
-  const c=tone==="emerald"?"text-emerald-300":tone==="red"?"text-red-300":tone==="violet"?"text-violet-300":"text-sky-300";
+function MiniKpi({label,value,tone}:{label:string;value:number|string;tone:"sky"|"emerald"|"amber"|"violet"|"red"}){
+  const c=tone==="emerald"?"text-emerald-300":tone==="red"?"text-red-300":tone==="amber"?"text-amber-300":tone==="violet"?"text-violet-300":"text-sky-300";
   return <div className="rounded-xl border border-white/[.055] bg-black/15 p-3"><div className={`text-xl font-semibold ${c}`}>{value}</div><div className="mt-1 text-[8px] font-semibold uppercase tracking-[.11em] text-slate-600">{label}</div></div>;
 }
 

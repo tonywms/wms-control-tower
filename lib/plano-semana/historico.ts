@@ -176,7 +176,7 @@ export async function registrarFotografiaSemana({
 
   /*
    * IMPORTANTE:
-   * O fechamento definitivo será tratado separadamente no ID 52.
+   * O fechamento definitivo é tratado separadamente pela automação semanal.
    *
    * Esta função registra/atualiza a fotografia da semana.
    * Enquanto a semana ainda está em andamento ela permanece Parcial.
@@ -263,5 +263,3 @@ export async function fecharSemanasAnterioresPendentes() {
     semanas: resultados,
   };
 }
-
-fecharSemanasAnterioresPendentes()

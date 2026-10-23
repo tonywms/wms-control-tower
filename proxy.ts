@@ -15,7 +15,7 @@ import { updateSession } from "@/lib/supabase/proxy";
  * Mesmo que alguém esqueça true em produção, o hostname impede
  * o bypass fora do ambiente local.
  */
-const DEV_BYPASS_AUTH = true;
+const DEV_BYPASS_AUTH = false;
 
 export async function proxy(request: NextRequest) {
   const hostname = request.nextUrl.hostname;

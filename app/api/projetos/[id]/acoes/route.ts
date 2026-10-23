@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requirePermission } from "@/lib/auth/permissions";
+import { dispararSincronizacaoNotificacoes } from "@/lib/notificacoes/sincronizar";
 
 const PRIORIDADES = ["Baixa", "Normal", "Alta", "Crítica"] as const;
+
 const STATUS = [
   "Pendente",
   "Em andamento",
@@ -23,11 +25,11 @@ const txt = (value: unknown) =>
 const nullable = (value: unknown) => txt(value) || null;
 
 /**
- * Em DEV estamos usando bypass de autenticação.
- * Portanto auth.uid() não existe e o RLS esconderia os registros.
+ * Em DEV usamos Admin Client server-side para permitir
+ * o funcionamento do ambiente local.
  *
- * DEV       -> Admin Client server-side
- * PRODUÇÃO  -> Client autenticado normal + RLS
+ * DEV      -> Admin Client server-side
+ * PRODUÇÃO -> Client autenticado normal + RLS
  */
 async function getSupabase() {
   if (process.env.NODE_ENV !== "production") {
@@ -36,6 +38,11 @@ async function getSupabase() {
 
   return await createClient();
 }
+
+/* =========================================================
+   GET
+   Lista as ações do projeto
+========================================================= */
 
 export async function GET(
   _req: NextRequest,
@@ -50,11 +57,14 @@ export async function GET(
           success: false,
           error: permission.error,
         },
-        { status: permission.status },
+        {
+          status: permission.status,
+        },
       );
     }
 
     const { id } = await params;
+
     const supabase = await getSupabase();
 
     const { data, error } = await supabase
@@ -83,12 +93,16 @@ export async function GET(
         )
       `)
       .eq("projeto_id", id)
-      .order("ordem", { ascending: true })
+      .order("ordem", {
+        ascending: true,
+      })
       .order("prazo", {
         ascending: true,
         nullsFirst: false,
       })
-      .order("created_at", { ascending: true });
+      .order("created_at", {
+        ascending: true,
+      });
 
     if (error) {
       console.error("[GET projeto_acoes]", error);
@@ -98,7 +112,9 @@ export async function GET(
           success: false,
           error: error.message,
         },
-        { status: 500 },
+        {
+          status: 500,
+        },
       );
     }
 
@@ -117,10 +133,17 @@ export async function GET(
             ? error.message
             : "Erro ao carregar ações.",
       },
-      { status: 500 },
+      {
+        status: 500,
+      },
     );
   }
 }
+
+/* =========================================================
+   POST
+   Cria uma nova ação
+========================================================= */
 
 export async function POST(
   req: NextRequest,
@@ -135,19 +158,39 @@ export async function POST(
           success: false,
           error: permission.error,
         },
-        { status: permission.status },
+        {
+          status: permission.status,
+        },
       );
     }
 
     const { id } = await params;
+
     const body = await req.json();
 
     const titulo = txt(body.titulo);
-    const descricao = nullable(body.descricao);
-    const prioridade = txt(body.prioridade) || "Normal";
-    const status = txt(body.status) || "Pendente";
-    const responsavelId = nullable(body.responsavel_id);
-    const prazo = nullable(body.prazo);
+
+    const descricao = nullable(
+      body.descricao,
+    );
+
+    const prioridade =
+      txt(body.prioridade) || "Normal";
+
+    const status =
+      txt(body.status) || "Pendente";
+
+    const responsavelId = nullable(
+      body.responsavel_id,
+    );
+
+    const prazo = nullable(
+      body.prazo,
+    );
+
+    /* =====================================================
+       VALIDAÇÕES
+    ===================================================== */
 
     if (!titulo) {
       return NextResponse.json(
@@ -155,7 +198,9 @@ export async function POST(
           success: false,
           error: "Informe o título da ação.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
@@ -169,27 +214,40 @@ export async function POST(
           success: false,
           error: "Prioridade inválida.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
-    if (!STATUS.includes(status as (typeof STATUS)[number])) {
+    if (
+      !STATUS.includes(
+        status as (typeof STATUS)[number],
+      )
+    ) {
       return NextResponse.json(
         {
           success: false,
           error: "Status inválido.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
-    if (prazo && !/^\d{4}-\d{2}-\d{2}$/.test(prazo)) {
+    if (
+      prazo &&
+      !/^\d{4}-\d{2}-\d{2}$/.test(prazo)
+    ) {
       return NextResponse.json(
         {
           success: false,
           error: "Prazo inválido.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
 
@@ -206,9 +264,15 @@ export async function POST(
           success: false,
           error: "Ordem inválida.",
         },
-        { status: 400 },
+        {
+          status: 400,
+        },
       );
     }
+
+    /* =====================================================
+       BANCO
+    ===================================================== */
 
     const supabase = await getSupabase();
 
@@ -222,12 +286,16 @@ export async function POST(
         status,
         responsavel_id: responsavelId,
         prazo,
+
         concluida_em:
           status === "Concluída"
             ? new Date().toISOString()
             : null,
+
         ordem,
-        criado_por: permission.usuario.usuarioId,
+
+        criado_por:
+          permission.usuario.usuarioId,
       })
       .select(`
         id,
@@ -255,26 +323,58 @@ export async function POST(
       .single();
 
     if (error) {
-      console.error("[POST projeto_acoes]", error);
+      console.error(
+        "[POST projeto_acoes]",
+        error,
+      );
 
       return NextResponse.json(
         {
           success: false,
           error: error.message,
         },
-        { status: 500 },
+        {
+          status: 500,
+        },
       );
     }
+
+    /* =====================================================
+       NOTIFICAÇÕES POR EVENTO
+
+       A ação já foi gravada com sucesso.
+
+       A sincronização verifica imediatamente os alertas
+       executivos e persiste as notificações correspondentes.
+
+       A própria função trata internamente qualquer falha,
+       portanto erro de notificação não desfaz a criação
+       da ação.
+    ===================================================== */
+
+    await dispararSincronizacaoNotificacoes(
+      supabase,
+      "acao_criada",
+    );
+
+    /* =====================================================
+       RESPOSTA
+    ===================================================== */
 
     return NextResponse.json(
       {
         success: true,
         acao: data,
       },
-      { status: 201 },
+      {
+        status: 201,
+      },
     );
   } catch (error) {
-    console.error("[POST projeto_acoes]", error);
+    console.error(
+      "[POST projeto_acoes]",
+      error,
+    );
 
     return NextResponse.json(
       {
@@ -284,7 +384,9 @@ export async function POST(
             ? error.message
             : "Erro ao criar ação.",
       },
-      { status: 500 },
+      {
+        status: 500,
+      },
     );
   }
 }

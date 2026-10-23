@@ -83,7 +83,7 @@ export type UsuarioContexto = {
  * IMPORTANTE:
  * O bypass somente é aceito quando NODE_ENV !== "production".
  */
-const DEV_BYPASS_AUTH = true;
+const DEV_BYPASS_AUTH = false;
 
 /*
  * Usuário que será utilizado durante o desenvolvimento.

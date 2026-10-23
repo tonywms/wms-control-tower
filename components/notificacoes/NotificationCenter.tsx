@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type Severidade = "Crítico" | "Atenção" | "Informativo";
+type Severidade = "Crítico" | "Atenção" | "Informação";
 type Aba = "alertas" | "notificacoes";
 type FiltroAlerta = "Todos" | "Críticos" | "Atenção";
 type FiltroNotificacao = "Todas" | "Críticas" | "Não lidas";
@@ -67,7 +67,7 @@ function normalizarNotificacoes(payload: any): Notificacao[] {
     severidade:
       n.severidade === "Crítico" || n.severidade === "Atenção"
         ? n.severidade
-        : "Informativo",
+        : "Informação",
     titulo: String(n.titulo ?? n.mensagem ?? "Notificação"),
     descricao: n.descricao ?? n.mensagem ?? null,
     lida: Boolean(n.lida ?? n.read ?? false),
@@ -274,14 +274,8 @@ export default function NotificationCenter({ onOpenProjeto }: Props) {
   async function marcarLida(n: Notificacao) {
     if (n.lida) return;
 
-    setNotificacoes(atual =>
-      atual.map(x =>
-        x.id === n.id ? { ...x, lida: true } : x,
-      ),
-    );
-
     try {
-      await fetch("/api/notificacoes", {
+      const response = await fetch("/api/notificacoes", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -291,16 +285,36 @@ export default function NotificationCenter({ onOpenProjeto }: Props) {
           lida: true,
         }),
       });
-    } catch {}
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || data?.success === false) {
+        throw new Error(
+          data?.error || "Erro ao marcar notificação como lida.",
+        );
+      }
+
+      setNotificacoes(atual =>
+        atual.map(x =>
+          x.id === n.id ? { ...x, lida: true } : x,
+        ),
+      );
+
+      setErro("");
+    } catch (e) {
+      setErro(
+        e instanceof Error
+          ? e.message
+          : "Erro ao marcar notificação como lida.",
+      );
+    }
   }
 
   async function marcarTodas() {
-    setNotificacoes(atual =>
-      atual.map(x => ({ ...x, lida: true })),
-    );
+    if (!naoLidas) return;
 
     try {
-      await fetch("/api/notificacoes", {
+      const response = await fetch("/api/notificacoes", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -309,9 +323,28 @@ export default function NotificationCenter({ onOpenProjeto }: Props) {
           todas: true,
         }),
       });
-    } catch {}
-  }
 
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || data?.success === false) {
+        throw new Error(
+          data?.error || "Erro ao marcar todas as notificações como lidas.",
+        );
+      }
+
+      setNotificacoes(atual =>
+        atual.map(x => ({ ...x, lida: true })),
+      );
+
+      setErro("");
+    } catch (e) {
+      setErro(
+        e instanceof Error
+          ? e.message
+          : "Erro ao marcar todas as notificações como lidas.",
+      );
+    }
+  }
   async function abrirNotificacao(n: Notificacao) {
     await marcarLida(n);
 

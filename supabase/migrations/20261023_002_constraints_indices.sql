@@ -1,4 +1,4 @@
-﻿-- ============================================================
+-- ============================================================
 -- WMS EXPERT CONTROL TOWER
 -- Migration 002 - Constraints e índices
 -- Baseline consolidada em 23/10/2026
@@ -38,152 +38,186 @@ ALTER TABLE public.notificacoes ADD CONSTRAINT notificacoes_usuario_chave_unique
 ALTER TABLE public.plano_semana_historico ADD CONSTRAINT plano_semana_historico_periodo_uk UNIQUE (inicio_semana, fim_semana);
 
 -- ============================================================
+
+-- ============================================================
 -- FOREIGN KEYS
 -- ============================================================
 
-ALTER TABLE public.projetos
-    ADD CONSTRAINT projetos_cliente_id_fkey
-    FOREIGN KEY (cliente_id) REFERENCES public.clientes(id);
+ALTER TABLE public.acoes ADD CONSTRAINT acoes_created_by_fkey
+FOREIGN KEY (created_by) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.projetos
-    ADD CONSTRAINT projetos_etapa_id_fkey
-    FOREIGN KEY (etapa_id) REFERENCES public.etapas(id);
+ALTER TABLE public.acoes ADD CONSTRAINT acoes_projeto_id_fkey
+FOREIGN KEY (projeto_id) REFERENCES public.projetos(id) ON DELETE CASCADE;
 
-ALTER TABLE public.projetos
-    ADD CONSTRAINT projetos_responsavel_id_fkey
-    FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id);
+ALTER TABLE public.acoes ADD CONSTRAINT acoes_responsavel_id_fkey
+FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.projetos
-    ADD CONSTRAINT projetos_started_by_fkey
-    FOREIGN KEY (started_by) REFERENCES public.usuarios(id);
+ALTER TABLE public.comentarios ADD CONSTRAINT comentarios_projeto_id_fkey
+FOREIGN KEY (projeto_id) REFERENCES public.projetos(id) ON DELETE CASCADE;
 
-ALTER TABLE public.projetos
-    ADD CONSTRAINT projetos_paused_by_fkey
-    FOREIGN KEY (paused_by) REFERENCES public.usuarios(id);
+ALTER TABLE public.comentarios ADD CONSTRAINT comentarios_usuario_id_fkey
+FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.projetos
-    ADD CONSTRAINT projetos_finished_by_fkey
-    FOREIGN KEY (finished_by) REFERENCES public.usuarios(id);
+ALTER TABLE public.historico_clientes ADD CONSTRAINT historico_clientes_cliente_id_fkey
+FOREIGN KEY (cliente_id) REFERENCES public.clientes(id) ON DELETE CASCADE;
 
-ALTER TABLE public.historico_status
-    ADD CONSTRAINT historico_status_projeto_id_fkey
-    FOREIGN KEY (projeto_id) REFERENCES public.projetos(id);
+ALTER TABLE public.historico_projeto ADD CONSTRAINT historico_projeto_projeto_id_fkey
+FOREIGN KEY (projeto_id) REFERENCES public.projetos(id) ON DELETE CASCADE;
 
-ALTER TABLE public.historico_status
-    ADD CONSTRAINT historico_status_usuario_id_fkey
-    FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id);
+ALTER TABLE public.historico_projeto ADD CONSTRAINT historico_projeto_usuario_id_fkey
+FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.projeto_etapas_historico
-    ADD CONSTRAINT projeto_etapas_historico_projeto_id_fkey
-    FOREIGN KEY (projeto_id) REFERENCES public.projetos(id);
+ALTER TABLE public.historico_saneamento ADD CONSTRAINT historico_saneamento_projeto_id_fkey
+FOREIGN KEY (projeto_id) REFERENCES public.projetos(id) ON DELETE CASCADE;
 
-ALTER TABLE public.projeto_etapas_historico
-    ADD CONSTRAINT projeto_etapas_historico_etapa_anterior_id_fkey
-    FOREIGN KEY (etapa_anterior_id) REFERENCES public.etapas(id);
+ALTER TABLE public.historico_status ADD CONSTRAINT historico_status_projeto_id_fkey
+FOREIGN KEY (projeto_id) REFERENCES public.projetos(id) ON DELETE CASCADE;
 
-ALTER TABLE public.projeto_etapas_historico
-    ADD CONSTRAINT projeto_etapas_historico_etapa_nova_id_fkey
-    FOREIGN KEY (etapa_nova_id) REFERENCES public.etapas(id);
+ALTER TABLE public.historico_status ADD CONSTRAINT historico_status_usuario_id_fkey
+FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.projeto_etapas_historico
-    ADD CONSTRAINT projeto_etapas_historico_usuario_id_fkey
-    FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id);
+ALTER TABLE public.notificacoes ADD CONSTRAINT notificacoes_projeto_id_fkey
+FOREIGN KEY (projeto_id) REFERENCES public.projetos(id) ON DELETE CASCADE;
 
-ALTER TABLE public.acoes
-    ADD CONSTRAINT acoes_projeto_id_fkey
-    FOREIGN KEY (projeto_id) REFERENCES public.projetos(id);
+ALTER TABLE public.notificacoes ADD CONSTRAINT notificacoes_usuario_id_fkey
+FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE CASCADE;
 
-ALTER TABLE public.acoes
-    ADD CONSTRAINT acoes_responsavel_id_fkey
-    FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id);
+ALTER TABLE public.pendencias ADD CONSTRAINT pendencias_projeto_id_fkey
+FOREIGN KEY (projeto_id) REFERENCES public.projetos(id) ON DELETE CASCADE;
 
-ALTER TABLE public.acoes
-    ADD CONSTRAINT acoes_created_by_fkey
-    FOREIGN KEY (created_by) REFERENCES public.usuarios(id);
+ALTER TABLE public.pendencias ADD CONSTRAINT pendencias_responsavel_id_fkey
+FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.pendencias
-    ADD CONSTRAINT pendencias_projeto_id_fkey
-    FOREIGN KEY (projeto_id) REFERENCES public.projetos(id);
+ALTER TABLE public.plano_semana_historico ADD CONSTRAINT plano_semana_historico_registrado_por_fkey
+FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.pendencias
-    ADD CONSTRAINT pendencias_responsavel_id_fkey
-    FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id);
+ALTER TABLE public.projeto_acoes ADD CONSTRAINT projeto_acoes_criado_por_fkey
+FOREIGN KEY (criado_por) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.comentarios
-    ADD CONSTRAINT comentarios_projeto_id_fkey
-    FOREIGN KEY (projeto_id) REFERENCES public.projetos(id);
+ALTER TABLE public.projeto_acoes ADD CONSTRAINT projeto_acoes_projeto_id_fkey
+FOREIGN KEY (projeto_id) REFERENCES public.projetos(id) ON DELETE CASCADE;
 
-ALTER TABLE public.comentarios
-    ADD CONSTRAINT comentarios_usuario_id_fkey
-    FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id);
+ALTER TABLE public.projeto_acoes ADD CONSTRAINT projeto_acoes_responsavel_id_fkey
+FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.historico_clientes
-    ADD CONSTRAINT historico_clientes_cliente_id_fkey
-    FOREIGN KEY (cliente_id) REFERENCES public.clientes(id);
+ALTER TABLE public.projeto_etapas_historico ADD CONSTRAINT projeto_etapas_historico_etapa_anterior_id_fkey
+FOREIGN KEY (etapa_anterior_id) REFERENCES public.etapas(id) ON DELETE SET NULL;
 
+ALTER TABLE public.projeto_etapas_historico ADD CONSTRAINT projeto_etapas_historico_etapa_nova_id_fkey
+FOREIGN KEY (etapa_nova_id) REFERENCES public.etapas(id) ON DELETE SET NULL;
 
-ALTER TABLE public.historico_projeto
-    ADD CONSTRAINT historico_projeto_projeto_id_fkey
-    FOREIGN KEY (projeto_id) REFERENCES public.projetos(id);
+ALTER TABLE public.projeto_etapas_historico ADD CONSTRAINT projeto_etapas_historico_projeto_id_fkey
+FOREIGN KEY (projeto_id) REFERENCES public.projetos(id) ON DELETE CASCADE;
 
-ALTER TABLE public.historico_projeto
-    ADD CONSTRAINT historico_projeto_usuario_id_fkey
-    FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id);
+ALTER TABLE public.projeto_etapas_historico ADD CONSTRAINT projeto_etapas_historico_usuario_id_fkey
+FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.historico_saneamento
-    ADD CONSTRAINT historico_saneamento_projeto_id_fkey
-    FOREIGN KEY (projeto_id) REFERENCES public.projetos(id);
+ALTER TABLE public.projeto_marcos ADD CONSTRAINT projeto_marcos_criado_por_fkey
+FOREIGN KEY (criado_por) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
+ALTER TABLE public.projeto_marcos ADD CONSTRAINT projeto_marcos_projeto_id_fkey
+FOREIGN KEY (projeto_id) REFERENCES public.projetos(id) ON DELETE CASCADE;
 
-ALTER TABLE public.notificacoes
-    ADD CONSTRAINT notificacoes_usuario_id_fkey
-    FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id);
+ALTER TABLE public.projeto_marcos ADD CONSTRAINT projeto_marcos_responsavel_id_fkey
+FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.notificacoes
-    ADD CONSTRAINT notificacoes_projeto_id_fkey
-    FOREIGN KEY (projeto_id) REFERENCES public.projetos(id);
+ALTER TABLE public.projeto_pendencias ADD CONSTRAINT projeto_pendencias_criado_por_fkey
+FOREIGN KEY (criado_por) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.plano_semana_historico
-    ADD CONSTRAINT plano_semana_historico_registrado_por_fkey
-    FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id);
+ALTER TABLE public.projeto_pendencias ADD CONSTRAINT projeto_pendencias_projeto_id_fkey
+FOREIGN KEY (projeto_id) REFERENCES public.projetos(id) ON DELETE CASCADE;
 
-ALTER TABLE public.projeto_acoes
-    ADD CONSTRAINT projeto_acoes_projeto_id_fkey
-    FOREIGN KEY (projeto_id) REFERENCES public.projetos(id);
+ALTER TABLE public.projeto_pendencias ADD CONSTRAINT projeto_pendencias_responsavel_id_fkey
+FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.projeto_acoes
-    ADD CONSTRAINT projeto_acoes_responsavel_id_fkey
-    FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id);
+ALTER TABLE public.projetos ADD CONSTRAINT projetos_cliente_id_fkey
+FOREIGN KEY (cliente_id) REFERENCES public.clientes(id) ON DELETE RESTRICT;
 
-ALTER TABLE public.projeto_acoes
-    ADD CONSTRAINT projeto_acoes_criado_por_fkey
-    FOREIGN KEY (criado_por) REFERENCES public.usuarios(id);
+ALTER TABLE public.projetos ADD CONSTRAINT projetos_etapa_id_fkey
+FOREIGN KEY (etapa_id) REFERENCES public.etapas(id) ON DELETE SET NULL;
 
-ALTER TABLE public.projeto_marcos
-    ADD CONSTRAINT projeto_marcos_projeto_id_fkey
-    FOREIGN KEY (projeto_id) REFERENCES public.projetos(id);
+ALTER TABLE public.projetos ADD CONSTRAINT projetos_finished_by_fkey
+FOREIGN KEY (finished_by) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.projeto_marcos
-    ADD CONSTRAINT projeto_marcos_responsavel_id_fkey
-    FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id);
+ALTER TABLE public.projetos ADD CONSTRAINT projetos_paused_by_fkey
+FOREIGN KEY (paused_by) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.projeto_marcos
-    ADD CONSTRAINT projeto_marcos_criado_por_fkey
-    FOREIGN KEY (criado_por) REFERENCES public.usuarios(id);
+ALTER TABLE public.projetos ADD CONSTRAINT projetos_responsavel_id_fkey
+FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
-ALTER TABLE public.projeto_pendencias
-    ADD CONSTRAINT projeto_pendencias_projeto_id_fkey
-    FOREIGN KEY (projeto_id) REFERENCES public.projetos(id);
-
-ALTER TABLE public.projeto_pendencias
-    ADD CONSTRAINT projeto_pendencias_responsavel_id_fkey
-    FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id);
-
-ALTER TABLE public.projeto_pendencias
-    ADD CONSTRAINT projeto_pendencias_criado_por_fkey
-    FOREIGN KEY (criado_por) REFERENCES public.usuarios(id);
+ALTER TABLE public.projetos ADD CONSTRAINT projetos_started_by_fkey
+FOREIGN KEY (started_by) REFERENCES public.usuarios(id) ON DELETE SET NULL;
 
 -- ============================================================
+-- CHECK CONSTRAINTS
+-- ============================================================
+
+ALTER TABLE public.acoes ADD CONSTRAINT acoes_prioridade_check
+CHECK (prioridade = ANY (ARRAY['Baixa'::text, 'Normal'::text, 'Alta'::text, 'Crítica'::text]));
+
+ALTER TABLE public.acoes ADD CONSTRAINT acoes_status_check
+CHECK (status = ANY (ARRAY['Pendente'::text, 'Em andamento'::text, 'Concluída'::text, 'Cancelada'::text]));
+
+ALTER TABLE public.historico_saneamento ADD CONSTRAINT historico_saneamento_item_tipo_check
+CHECK (item_tipo = ANY (ARRAY['projeto'::text, 'acao'::text, 'pendencia'::text]));
+
+ALTER TABLE public.historico_saneamento ADD CONSTRAINT historico_saneamento_operacao_check
+CHECK (operacao = ANY (ARRAY['reprogramar_prazo'::text, 'definir_responsavel'::text, 'concluir'::text, 'cancelar'::text]));
+
+ALTER TABLE public.historico_saneamento ADD CONSTRAINT historico_saneamento_severidade_check
+CHECK (severidade = ANY (ARRAY['Crítico'::text, 'Atenção'::text]));
+
+ALTER TABLE public.notificacoes ADD CONSTRAINT notificacoes_severidade_check
+CHECK (severidade = ANY (ARRAY['Crítico'::text, 'Atenção'::text, 'Informação'::text]));
+
+ALTER TABLE public.pendencias ADD CONSTRAINT pendencias_prioridade_check
+CHECK (prioridade = ANY (ARRAY['Baixa'::text, 'Normal'::text, 'Alta'::text, 'Crítica'::text]));
+
+ALTER TABLE public.pendencias ADD CONSTRAINT pendencias_status_check
+CHECK (status = ANY (ARRAY['Aberta'::text, 'Em análise'::text, 'Resolvida'::text, 'Cancelada'::text]));
+
+ALTER TABLE public.pendencias ADD CONSTRAINT pendencias_tipo_check
+CHECK (tipo = ANY (ARRAY['Pendência'::text, 'Bloqueio'::text, 'Risco'::text, 'Dependência'::text]));
+
+ALTER TABLE public.plano_semana_execucoes ADD CONSTRAINT plano_semana_execucoes_status_semana_check
+CHECK (status_semana IS NULL OR (status_semana = ANY (ARRAY['Parcial'::text, 'Fechada'::text])));
+
+ALTER TABLE public.plano_semana_execucoes ADD CONSTRAINT plano_semana_execucoes_tipo_execucao_check
+CHECK (tipo_execucao = ANY (ARRAY['Automatica'::text, 'Manual'::text]));
+
+ALTER TABLE public.plano_semana_historico ADD CONSTRAINT plano_semana_historico_status_fechamento_check
+CHECK (status_fechamento = ANY (ARRAY['Parcial'::text, 'Fechada'::text]));
+
+ALTER TABLE public.projeto_acoes ADD CONSTRAINT projeto_acoes_prioridade_check
+CHECK (prioridade::text = ANY (ARRAY['Baixa'::character varying, 'Normal'::character varying, 'Alta'::character varying, 'Crítica'::character varying]::text[]));
+
+ALTER TABLE public.projeto_acoes ADD CONSTRAINT projeto_acoes_status_check
+CHECK (status::text = ANY (ARRAY['Pendente'::character varying, 'Em andamento'::character varying, 'Concluída'::character varying, 'Cancelada'::character varying]::text[]));
+
+ALTER TABLE public.projeto_marcos ADD CONSTRAINT projeto_marcos_status_check
+CHECK (status::text = ANY (ARRAY['Previsto'::character varying, 'Em andamento'::character varying, 'Concluído'::character varying, 'Cancelado'::character varying]::text[]));
+
+ALTER TABLE public.projeto_pendencias ADD CONSTRAINT projeto_pendencias_prioridade_check
+CHECK (prioridade::text = ANY (ARRAY['Baixa'::character varying, 'Normal'::character varying, 'Alta'::character varying, 'Crítica'::character varying]::text[]));
+
+ALTER TABLE public.projeto_pendencias ADD CONSTRAINT projeto_pendencias_status_check
+CHECK (status::text = ANY (ARRAY['Pendente'::character varying, 'Em andamento'::character varying, 'Concluída'::character varying, 'Cancelada'::character varying]::text[]));
+
+ALTER TABLE public.projeto_pendencias ADD CONSTRAINT projeto_pendencias_tipo_check
+CHECK (tipo::text = ANY (ARRAY['Pendência'::character varying, 'Impedimento'::character varying]::text[]));
+
+ALTER TABLE public.projetos ADD CONSTRAINT projetos_percentual_check
+CHECK (percentual >= 0 AND percentual <= 100);
+
+ALTER TABLE public.projetos ADD CONSTRAINT projetos_prioridade_check
+CHECK (prioridade = ANY (ARRAY['Baixa'::text, 'Normal'::text, 'Alta'::text, 'Crítica'::text]));
+
+ALTER TABLE public.projetos ADD CONSTRAINT projetos_status_check
+CHECK (status = ANY (ARRAY['Não iniciado'::text, 'Planejado'::text, 'Em andamento'::text, 'Pausado'::text, 'Bloqueado'::text, 'Finalizado'::text, 'Cancelado'::text]));
+
+ALTER TABLE public.usuarios ADD CONSTRAINT usuarios_perfil_check
+CHECK (perfil = ANY (ARRAY['CEO'::text, 'Diretoria'::text, 'P&D'::text, 'Desenvolvimento'::text, 'Implantação'::text, 'Suporte'::text, 'Comercial'::text, 'Visualização'::text]));
+
 -- ÍNDICES
 -- Índices de PK/UNIQUE acima são criados automaticamente.
 -- Aqui ficam apenas os índices adicionais.

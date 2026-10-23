@@ -1,4 +1,4 @@
-﻿-- ============================================================
+-- ============================================================
 -- WMS EXPERT CONTROL TOWER
 -- Migration 003 - Functions, RLS e Policies
 -- Baseline consolidada em 23/10/2026
@@ -441,3 +441,39 @@ USING (public.control_tower_pode('editar'::text))
 WITH CHECK (public.control_tower_pode('editar'::text));
 
 -- Fim da migration 003.
+
+-- ============================================================
+-- TRIGGERS DE UPDATED_AT
+-- Estrutura validada contra o banco Supabase em 23/10/2026
+-- ============================================================
+
+DROP TRIGGER IF EXISTS trg_acoes_updated_at ON public.acoes;
+CREATE TRIGGER trg_acoes_updated_at
+BEFORE UPDATE ON public.acoes
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_clientes_updated_at ON public.clientes;
+CREATE TRIGGER trg_clientes_updated_at
+BEFORE UPDATE ON public.clientes
+FOR EACH ROW
+EXECUTE FUNCTION public.atualizar_clientes_updated_at();
+
+DROP TRIGGER IF EXISTS trg_pendencias_updated_at ON public.pendencias;
+CREATE TRIGGER trg_pendencias_updated_at
+BEFORE UPDATE ON public.pendencias
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_projetos_updated_at ON public.projetos;
+CREATE TRIGGER trg_projetos_updated_at
+BEFORE UPDATE ON public.projetos
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_usuarios_updated_at ON public.usuarios;
+CREATE TRIGGER trg_usuarios_updated_at
+BEFORE UPDATE ON public.usuarios
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+

@@ -26,17 +26,10 @@ type Ctx = {
 };
 
 const txt = (value: unknown) =>
-  typeof value === "string"
-    ? value.trim()
-    : "";
+  typeof value === "string" ? value.trim() : "";
 
-const nullable = (value: unknown) =>
-  txt(value) || null;
+const nullable = (value: unknown) => txt(value) || null;
 
-/**
- * DEV      -> Admin Client server-side
- * PRODUÇÃO -> Client autenticado normal + RLS
- */
 async function getSupabase() {
   if (process.env.NODE_ENV !== "production") {
     return createAdminClient();
@@ -55,8 +48,7 @@ export async function PUT(
   { params }: Ctx,
 ) {
   try {
-    const permission =
-      await requirePermission("editar");
+    const permission = await requirePermission("editar");
 
     if (!permission.ok) {
       return NextResponse.json(
@@ -71,16 +63,11 @@ export async function PUT(
     }
 
     const { id, acaoId } = await params;
-
     const body = await req.json();
-
     const supabase = await getSupabase();
 
     /* =====================================================
        BUSCA A AÇÃO ATUAL
-
-       Além de recuperar os valores atuais, garante que
-       acaoId pertence ao projeto informado.
     ===================================================== */
 
     const {
@@ -124,9 +111,6 @@ export async function PUT(
 
     /* =====================================================
        ATUALIZAÇÃO PARCIAL
-
-       Permite, por exemplo, enviar somente:
-       { status: "Concluída" }
     ===================================================== */
 
     const titulo =
@@ -245,23 +229,19 @@ export async function PUT(
 
     let concluidaEm = atual.concluida_em;
 
-    // A ação acabou de ser concluída.
     if (
       status === "Concluída" &&
       atual.status !== "Concluída"
     ) {
-      concluidaEm =
-        new Date().toISOString();
+      concluidaEm = new Date().toISOString();
     }
 
-    // Se reabriu ou mudou para qualquer outro status,
-    // removemos a data de conclusão.
     if (status !== "Concluída") {
       concluidaEm = null;
     }
 
     /* =====================================================
-       ATUALIZAÇÃO NO BANCO
+       UPDATE
     ===================================================== */
 
     const { data, error } = await supabase
@@ -275,8 +255,7 @@ export async function PUT(
         prazo,
         concluida_em: concluidaEm,
         ordem,
-        updated_at:
-          new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       })
       .eq("id", acaoId)
       .eq("projeto_id", id)
@@ -306,10 +285,7 @@ export async function PUT(
       .single();
 
     if (error) {
-      console.error(
-        "[PUT projeto_acoes]",
-        error,
-      );
+      console.error("[PUT projeto_acoes]", error);
 
       return NextResponse.json(
         {
@@ -325,31 +301,21 @@ export async function PUT(
     /* =====================================================
        NOTIFICAÇÕES POR EVENTO
 
-       Neste ponto a alteração da ação já foi salva.
-
-       Se a sincronização das notificações falhar,
-       dispararSincronizacaoNotificacoes trata o erro
-       internamente e não desfaz a operação principal.
+       Somente o usuário que executou a alteração.
     ===================================================== */
 
     await dispararSincronizacaoNotificacoes(
       supabase,
       "acao_atualizada",
+      permission.usuario.usuarioId,
     );
-
-    /* =====================================================
-       RESPOSTA
-    ===================================================== */
 
     return NextResponse.json({
       success: true,
       acao: data,
     });
   } catch (error) {
-    console.error(
-      "[PUT projeto_acoes]",
-      error,
-    );
+    console.error("[PUT projeto_acoes]", error);
 
     return NextResponse.json(
       {
@@ -376,8 +342,7 @@ export async function DELETE(
   { params }: Ctx,
 ) {
   try {
-    const permission =
-      await requirePermission("editar");
+    const permission = await requirePermission("editar");
 
     if (!permission.ok) {
       return NextResponse.json(
@@ -392,7 +357,6 @@ export async function DELETE(
     }
 
     const { id, acaoId } = await params;
-
     const supabase = await getSupabase();
 
     /* =====================================================
@@ -439,7 +403,7 @@ export async function DELETE(
     }
 
     /* =====================================================
-       EXCLUSÃO
+       DELETE
     ===================================================== */
 
     const { error } = await supabase
@@ -449,10 +413,7 @@ export async function DELETE(
       .eq("projeto_id", id);
 
     if (error) {
-      console.error(
-        "[DELETE projeto_acoes]",
-        error,
-      );
+      console.error("[DELETE projeto_acoes]", error);
 
       return NextResponse.json(
         {
@@ -468,28 +429,20 @@ export async function DELETE(
     /* =====================================================
        NOTIFICAÇÕES POR EVENTO
 
-       A ação já foi excluída.
-
-       Recalculamos os alertas executivos imediatamente.
+       Somente o usuário que executou a exclusão.
     ===================================================== */
 
     await dispararSincronizacaoNotificacoes(
       supabase,
       "acao_excluida",
+      permission.usuario.usuarioId,
     );
-
-    /* =====================================================
-       RESPOSTA
-    ===================================================== */
 
     return NextResponse.json({
       success: true,
     });
   } catch (error) {
-    console.error(
-      "[DELETE projeto_acoes]",
-      error,
-    );
+    console.error("[DELETE projeto_acoes]", error);
 
     return NextResponse.json(
       {

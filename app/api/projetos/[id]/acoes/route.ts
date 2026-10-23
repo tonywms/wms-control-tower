@@ -24,13 +24,6 @@ const txt = (value: unknown) =>
 
 const nullable = (value: unknown) => txt(value) || null;
 
-/**
- * Em DEV usamos Admin Client server-side para permitir
- * o funcionamento do ambiente local.
- *
- * DEV      -> Admin Client server-side
- * PRODUÇÃO -> Client autenticado normal + RLS
- */
 async function getSupabase() {
   if (process.env.NODE_ENV !== "production") {
     return createAdminClient();
@@ -64,7 +57,6 @@ export async function GET(
     }
 
     const { id } = await params;
-
     const supabase = await getSupabase();
 
     const { data, error } = await supabase
@@ -165,28 +157,14 @@ export async function POST(
     }
 
     const { id } = await params;
-
     const body = await req.json();
 
     const titulo = txt(body.titulo);
-
-    const descricao = nullable(
-      body.descricao,
-    );
-
-    const prioridade =
-      txt(body.prioridade) || "Normal";
-
-    const status =
-      txt(body.status) || "Pendente";
-
-    const responsavelId = nullable(
-      body.responsavel_id,
-    );
-
-    const prazo = nullable(
-      body.prazo,
-    );
+    const descricao = nullable(body.descricao);
+    const prioridade = txt(body.prioridade) || "Normal";
+    const status = txt(body.status) || "Pendente";
+    const responsavelId = nullable(body.responsavel_id);
+    const prazo = nullable(body.prazo);
 
     /* =====================================================
        VALIDAÇÕES
@@ -286,16 +264,12 @@ export async function POST(
         status,
         responsavel_id: responsavelId,
         prazo,
-
         concluida_em:
           status === "Concluída"
             ? new Date().toISOString()
             : null,
-
         ordem,
-
-        criado_por:
-          permission.usuario.usuarioId,
+        criado_por: permission.usuario.usuarioId,
       })
       .select(`
         id,
@@ -323,10 +297,7 @@ export async function POST(
       .single();
 
     if (error) {
-      console.error(
-        "[POST projeto_acoes]",
-        error,
-      );
+      console.error("[POST projeto_acoes]", error);
 
       return NextResponse.json(
         {
@@ -342,24 +313,15 @@ export async function POST(
     /* =====================================================
        NOTIFICAÇÕES POR EVENTO
 
-       A ação já foi gravada com sucesso.
-
-       A sincronização verifica imediatamente os alertas
-       executivos e persiste as notificações correspondentes.
-
-       A própria função trata internamente qualquer falha,
-       portanto erro de notificação não desfaz a criação
-       da ação.
+       Sincroniza somente para o usuário que executou
+       a criação da ação.
     ===================================================== */
 
     await dispararSincronizacaoNotificacoes(
       supabase,
       "acao_criada",
+      permission.usuario.usuarioId,
     );
-
-    /* =====================================================
-       RESPOSTA
-    ===================================================== */
 
     return NextResponse.json(
       {
@@ -371,10 +333,7 @@ export async function POST(
       },
     );
   } catch (error) {
-    console.error(
-      "[POST projeto_acoes]",
-      error,
-    );
+    console.error("[POST projeto_acoes]", error);
 
     return NextResponse.json(
       {

@@ -35,21 +35,34 @@ export default function ConfirmarAuthPage() {
           ? next
           : "/redefinir-senha";
 
-      if (!code) {
-        console.error(
-          "[Control Tower] /auth/confirmar sem code.",
-        );
+      try {
+        // O cliente do @supabase/ssr já troca o code da URL sozinho
+        // ao ser criado. getSession() espera essa inicialização terminar.
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-        if (ativo) {
-          setError(
-            "Link de recuperação sem código de autenticação.",
-          );
+        if (session) {
+          router.replace(destino);
+          router.refresh();
+          return;
         }
 
-        return;
-      }
+        if (!code) {
+          console.error(
+            "[Control Tower] /auth/confirmar sem code e sem sessão.",
+          );
 
-      try {
+          if (ativo) {
+            setError(
+              "Link de recuperação sem código de autenticação.",
+            );
+          }
+
+          return;
+        }
+
+        // Fallback: só chega aqui se a troca automática não criou sessão.
         const { data, error: exchangeError } =
           await supabase.auth.exchangeCodeForSession(
             code,

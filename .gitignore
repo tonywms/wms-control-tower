@@ -44,3 +44,10 @@ next-env.d.ts
 /backups/
 *.bak
 .vercel
+
+# Backups locais
+*.backup-*
+*.bak
+
+# Repomix
+repomix-output.xml

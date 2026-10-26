@@ -14,6 +14,7 @@ import {
   KanbanSquare,
   Layers3,
   LayoutDashboard,
+  MonitorPlay,
   LogOut,
   Menu,
   PackageCheck,
@@ -60,6 +61,7 @@ import ImplantacaoCentral from "@/components/implantacao/ImplantacaoCentral";
 import DesenvolvimentoCentral from "@/components/desenvolvimento/DesenvolvimentoCentral";
 import SuporteCentral from "@/components/suporte/SuporteCentral";
 import ComercialCentral from "@/components/comercial/ComercialCentral";
+import ControlTowerLive from "@/components/live/ControlTowerLive";
 
 type Projeto = {
   id: string;
@@ -123,6 +125,10 @@ const menuItems = [
     label: "Overview",
     icon: LayoutDashboard,
     active: true,
+  },
+  {
+    label: "Control Tower Live",
+    icon: MonitorPlay,
   },
   {
     label: "Agenda Executiva",
@@ -1636,7 +1642,13 @@ export default function Home() {
               />
             )}
 
-            {selectedMenu === "Governança" ? (
+            {selectedMenu === "Control Tower Live" ? (
+              <ControlTowerLive
+                projetos={projetos}
+                onOpenProjeto={openProjeto360ById}
+                onExit={() => setSelectedMenu("Overview")}
+              />
+            ) : selectedMenu === "Governança" ? (
               <GovernancaCentral onOpenProjeto={openProjeto360ById} />
             ) : selectedMenu === "Inconsistências" ? (
               <CentralInconsistencias onOpenProjeto={openProjeto360ById} />

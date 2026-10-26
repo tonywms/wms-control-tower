@@ -1,0 +1,2578 @@
+﻿"use client";
+
+import {
+  Activity, AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, CircleAlert,
+  Clock3, Gauge, Layers3, Maximize2, Pause, Play, ShieldAlert, Target, Timer,
+  Users, X, Zap, RefreshCw
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { calculateOperationalHealth } from "@/lib/control-tower/health";
+
+type Projeto = {
+  id: string;
+  cliente_id: string;
+  nome: string;
+  plataforma: string | null;
+  etapa_id: string | null;
+  setor: string | null;
+  responsavel_id: string | null;
+  responsavel_nome: string | null;
+  status: string;
+  prioridade: string;
+  data_inicio: string | null;
+  data_fim: string | null;
+  observacoes: string | null;
+  fase_origem: string | null;
+  percentual: number;
+  created_at: string;
+  updated_at: string;
+  cliente: { id: string; nome: string; cidade: string | null } | null;
+  etapa: { id: string; nome: string; ordem: number } | null;
+};
+
+type Props = {
+  projetos: Projeto[];
+  onOpenProjeto: (id: string) => void;
+  onExit: () => void;
+};
+
+type Health = "critical" | "attention" | "stable";
+
+type Ranked = Projeto & {
+  health: Health;
+  score: number;
+  lateDays: number;
+  reasons: string[];
+};
+
+type ExecutiveProject = {
+  id: string; nome: string; status: string; prioridade: string;
+  percentual: number | null; data_fim: string | null;
+  saude: "Crítico" | "Atenção" | "Estável"; score: number; lateDays: number; motivos: string[];
+  cliente?: { id: string; nome: string } | null;
+  etapa?: { id: string; nome: string; ordem: number } | null;
+  responsavel?: { id: string; nome: string } | null;
+  proximaAcao?: {
+    id: string; titulo: string; prioridade: string; prazo: string | null; vencida: boolean;
+  } | null;
+  detalhesAlertas?: {
+    pendenciasAbertas: {
+      id: string;
+      titulo: string;
+      prioridade: string;
+      prazo: string | null;
+      created_at: string;
+      agingDias: number;
+      responsavel?: { id: string; nome: string } | null;
+    }[];
+    impedimentos: { id: string; titulo: string; prioridade: string; prazo: string | null }[];
+    pendenciasVencidas: {
+      id: string;
+      titulo: string;
+      prioridade: string;
+      prazo: string | null;
+      created_at: string;
+      agingDias: number;
+    }[];
+    marcosAtrasados: { id: string; nome: string; data_prevista: string | null }[];
+    acoesVencidas: { id: string; titulo: string; prioridade: string; prazo: string | null }[];
+  };
+  indicadores: {
+    projetoAtrasado: boolean;
+    diasAtraso: number;
+    pendenciasAbertas: number;
+    pendenciasVencidas: number;
+    pendenciasHoje: number;
+    pendencias48h: number;
+    pendencias72h: number;
+    pendenciasSemPrazo: number;
+    maiorAgingPendenciaDias: number;
+    impedimentosAbertos: number;
+    impedimentosCriticos: number;
+    marcosAtrasados: number;
+    acoesAbertas: number;
+    acoesVencidas: number;
+  };
+};
+
+type ExecutiveMilestone = {
+  id: string; projeto_id: string; nome: string; status: string; data_prevista: string | null;
+  projeto: { id: string; nome: string; cliente?: { id: string; nome: string } | null } | null;
+};
+
+type ExecutiveDashboard = {
+  success: boolean; atualizadoEm: string;
+  resumo: {
+    total: number; ativos: number; estaveis: number; atencao: number; criticos: number;
+    atrasados: number; bloqueados: number; semPrazo: number; pendenciasAbertas: number;
+    pendenciasVencidas: number;
+    pendenciasHoje: number;
+    pendencias48h: number;
+    pendencias72h: number;
+    pendenciasSemPrazo: number;
+    maiorAgingPendenciaDias: number;
+    impedimentos: number;
+    impedimentosCriticos: number;
+    marcosAtrasados: number;
+    acoesAbertas: number;
+    acoesVencidas: number;
+    proximosMarcos: number;
+  };
+  ranking: ExecutiveProject[]; projetos: ExecutiveProject[]; proximosMarcos: ExecutiveMilestone[];
+};
+
+const slides = [
+  { key: "agora", label: "Agora", icon: Activity },
+  { key: "problemas", label: "Problemas", icon: AlertTriangle },
+  { key: "riscos", label: "Riscos", icon: ShieldAlert },
+  { key: "pendencias", label: "Pendências", icon: Clock3 },
+  { key: "areas", label: "Áreas", icon: Layers3 },
+  { key: "marcos", label: "Marcos", icon: CalendarDays },
+  { key: "capacidade", label: "Capacidade", icon: Users },
+  { key: "guerra", label: "Guerra", icon: Zap },
+] as const;
+
+type SlideKey = (typeof slides)[number]["key"];
+
+const normalize = (value?: string | null) =>
+  (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+function localDate(value: string | null) {
+  if (!value) return null;
+  const [y, m, d] = value.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+}
+
+function diffDays(value: string | null) {
+  const date = localDate(value);
+  if (!date) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+  return Math.round((date.getTime() - today.getTime()) / 86400000);
+}
+
+function fmtDate(value: string | null) {
+  const d = localDate(value);
+  return d ? d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "Sem prazo";
+}
+
+function isClosed(p: Projeto) {
+  const s = normalize(p.status);
+  return s === "finalizado" || s === "cancelado";
+}
+
+function rankProject(p: Projeto): Ranked {
+  const late =
+    diffDays(p.data_fim);
+
+  const lateDays =
+    late !== null &&
+    late < 0 &&
+    !isClosed(p)
+      ? Math.abs(late)
+      : 0;
+
+  const result =
+    calculateOperationalHealth({
+      status:
+        p.status,
+
+      prioridade:
+        p.prioridade,
+
+      lateDays,
+
+      hasOwner:
+        Boolean(
+          p.responsavel_nome?.trim()
+        ),
+
+      hasDeadline:
+        Boolean(
+          p.data_fim
+        ),
+
+      pendenciasVencidas: 0,
+      impedimentosAbertos: 0,
+      impedimentosCriticos: 0,
+      marcosAtrasados: 0,
+      acoesVencidas: 0,
+    });
+
+  const health: Health =
+    result.saude === "Crítico"
+      ? "critical"
+      : result.saude === "Atenção"
+        ? "attention"
+        : "stable";
+
+  return {
+    ...p,
+
+    health,
+
+    score:
+      result.score,
+
+    lateDays,
+
+    reasons:
+      result.motivos,
+  };
+}
+const healthClasses: Record<Health, string> = {
+  critical: "border-rose-400/25 bg-rose-400/[0.08] text-rose-300",
+  attention: "border-amber-400/25 bg-amber-400/[0.08] text-amber-300",
+  stable: "border-emerald-400/25 bg-emerald-400/[0.08] text-emerald-300",
+};
+
+function Kpi({ label, value, helper, tone = "sky" }: { label: string; value: string | number; helper: string; tone?: "sky" | "rose" | "amber" | "emerald" }) {
+  const toneClass = tone === "rose" ? "text-rose-300" : tone === "amber" ? "text-amber-300" : tone === "emerald" ? "text-emerald-300" : "text-sky-300";
+  return (
+    <div className="min-h-0 overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.035] p-[clamp(12px,1.1vw,20px)] shadow-[0_18px_60px_rgba(0,0,0,.18)]">
+      <div className="text-[clamp(9px,.62vw,12px)] font-semibold uppercase tracking-[.16em] text-slate-500">{label}</div>
+      <div className={`mt-2 text-[clamp(24px,2.2vw,44px)] font-semibold tracking-[-.05em] ${toneClass}`}>{value}</div>
+      <div className="mt-1 line-clamp-2 text-[clamp(9px,.65vw,12px)] leading-snug text-slate-500">{helper}</div>
+    </div>
+  );
+}
+
+function Panel({ title, subtitle, children, className = "" }: { title: string; subtitle?: string; children: React.ReactNode; className?: string }) {
+  return (
+    <section className={`min-h-0 overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] ${className}`}>
+      <div className="border-b border-white/[0.07] px-[clamp(14px,1.2vw,22px)] py-[clamp(10px,.8vw,15px)]">
+        <h3 className="text-[clamp(15px,1.05vw,20px)] font-semibold tracking-[-.02em] text-white">{title}</h3>
+        {subtitle && <p className="mt-0.5 text-[clamp(11px,.72vw,14px)] text-slate-400">{subtitle}</p>}
+      </div>
+      <div className="h-[calc(100%-58px)] min-h-0 overflow-auto px-[clamp(12px,1vw,18px)] py-2">{children}</div>
+    </section>
+  );
+}
+
+function ProjectRows({ items, limit = 8 }: { items: Ranked[]; limit?: number }) {
+  return (
+    <div className="divide-y divide-white/[0.07]">
+      {items.slice(0, limit).map((p, i) => (
+        <div
+          key={p.id}
+          className="grid w-full grid-cols-[44px_minmax(0,1fr)] items-center gap-4 px-2 py-[clamp(10px,1vh,16px)]"
+        >
+          <span className="text-[clamp(11px,.72vw,14px)] font-medium text-slate-500">
+            {String(i + 1).padStart(2, "0")}
+          </span>
+
+          <div className="min-w-0">
+            <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+              <span className="truncate text-[clamp(14px,1vw,19px)] font-semibold tracking-[-.02em] text-slate-100">
+                {p.nome}
+              </span>
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[clamp(9px,.62vw,12px)] font-bold uppercase tracking-[.05em] ${healthClasses[p.health]}`}
+              >
+                {p.health === "critical" ? "Crítico" : p.health === "attention" ? "Atenção" : "Estável"}
+              </span>
+            </div>
+
+            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[clamp(11px,.76vw,14px)] text-slate-400">
+              <span className="font-medium text-slate-300">{p.cliente?.nome ?? "Sem cliente"}</span>
+              <span className="text-slate-600">•</span>
+              <span>{p.reasons.join(" • ") || "Operação estável"}</span>
+              {p.responsavel_nome && (
+                <>
+                  <span className="text-slate-600">•</span>
+                  <span>Resp. {p.responsavel_nome}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {items.length === 0 && (
+        <div className="py-10 text-center text-[clamp(12px,.8vw,15px)] text-slate-500">
+          Nenhum item para exibir.
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function PendingAgingRanking({
+  items,
+  executiveById,
+  onOpenProjeto,
+}: {
+  items: Ranked[];
+  executiveById: Map<string, ExecutiveProject>;
+  onOpenProjeto: (id: string) => void;
+}) {
+  const rows = items
+    .map((p) => {
+      const ex = executiveById.get(p.id);
+
+      const abertas =
+        ex?.indicadores.pendenciasAbertas ?? 0;
+
+      const vencidas =
+        ex?.indicadores.pendenciasVencidas ?? 0;
+
+      const hoje =
+        ex?.indicadores.pendenciasHoje ?? 0;
+
+      const h48 =
+        ex?.indicadores.pendencias48h ?? 0;
+
+      const h72 =
+        ex?.indicadores.pendencias72h ?? 0;
+
+      const semPrazo =
+        ex?.indicadores.pendenciasSemPrazo ?? 0;
+
+      const aging =
+        ex?.indicadores.maiorAgingPendenciaDias ?? 0;
+
+      const impedimentos =
+        ex?.indicadores.impedimentosAbertos ?? 0;
+
+      const acoes =
+        ex?.indicadores.acoesVencidas ?? 0;
+
+      const marcos =
+        ex?.indicadores.marcosAtrasados ?? 0;
+
+      const totalOperacional =
+        vencidas +
+        impedimentos +
+        acoes +
+        marcos;
+
+      return {
+        p,
+        ex,
+        abertas,
+        vencidas,
+        hoje,
+        h48,
+        h72,
+        semPrazo,
+        aging,
+        impedimentos,
+        acoes,
+        marcos,
+        totalOperacional,
+      };
+    })
+    .filter(
+      (x) => x.abertas > 0
+    )
+    .sort(
+      (a, b) =>
+        b.aging - a.aging ||
+        b.vencidas - a.vencidas ||
+        b.totalOperacional - a.totalOperacional ||
+        b.p.score - a.p.score
+    );
+
+  return (
+    <div className="h-full min-h-0 overflow-y-auto pr-1">
+      <div className="grid grid-cols-1 gap-3 pb-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        {rows.map((item, index) => {
+          const {
+            p,
+            ex,
+            abertas,
+            vencidas,
+            hoje,
+            h48,
+            h72,
+            semPrazo,
+            aging,
+            impedimentos,
+            acoes,
+            marcos,
+          } = item;
+
+          const proximaAcao =
+            ex?.proximaAcao;
+
+          return (
+            <button
+              key={p.id}
+              onClick={() =>
+                onOpenProjeto(p.id)
+              }
+              className="
+                group
+                relative
+                flex
+                min-h-[235px]
+                min-w-0
+                flex-col
+                overflow-hidden
+                rounded-2xl
+                border
+                border-white/[0.08]
+                bg-black/[0.12]
+                p-4
+                text-left
+                transition
+                hover:-translate-y-0.5
+                hover:border-sky-400/25
+                hover:bg-white/[0.035]
+              "
+            >
+              <div
+                className={`absolute left-0 top-0 h-full w-[3px] ${
+                  p.health === "critical"
+                    ? "bg-rose-400"
+                    : p.health === "attention"
+                      ? "bg-amber-400"
+                      : "bg-emerald-400"
+                }`}
+              />
+
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[8px] font-semibold uppercase tracking-[.15em] text-slate-600">
+                    #{String(index + 1).padStart(2, "0")}
+                  </div>
+
+                  <div className="mt-1 flex items-center gap-2">
+                    <div className="truncate text-[14px] font-semibold text-white">
+                      {p.nome}
+                    </div>
+
+                    <span
+                      className={`shrink-0 rounded-full border px-2 py-0.5 text-[7px] font-bold uppercase ${healthClasses[p.health]}`}
+                    >
+                      {p.health === "critical"
+                        ? "Crítico"
+                        : p.health === "attention"
+                          ? "Atenção"
+                          : "Estável"}
+                    </span>
+                  </div>
+
+                  <div className="mt-1 truncate text-[9px] text-slate-500">
+                    {p.responsavel_nome ||
+                      "Sem responsável"}
+                  </div>
+                </div>
+
+                <div className="shrink-0 text-right">
+                  <div className="text-[7px] uppercase tracking-[.12em] text-slate-600">
+                    Aging
+                  </div>
+
+                  <div
+                    className={`mt-1 text-lg font-semibold ${
+                      aging >= 15
+                        ? "text-rose-300"
+                        : aging >= 7
+                          ? "text-amber-300"
+                          : "text-sky-300"
+                    }`}
+                  >
+                    {aging}d
+                  </div>
+                </div>
+              </div>
+
+              <div className="my-3 h-px bg-white/[0.06]" />
+
+              <div className="grid grid-cols-5 gap-1.5">
+                <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2">
+                  <div className="text-[6px] font-semibold uppercase text-slate-600">
+                    Venc.
+                  </div>
+                  <div className={`mt-1 text-sm font-semibold ${vencidas ? "text-rose-300" : "text-slate-400"}`}>
+                    {vencidas}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2">
+                  <div className="text-[6px] font-semibold uppercase text-slate-600">
+                    Hoje
+                  </div>
+                  <div className={`mt-1 text-sm font-semibold ${hoje ? "text-amber-300" : "text-slate-400"}`}>
+                    {hoje}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2">
+                  <div className="text-[6px] font-semibold uppercase text-slate-600">
+                    48h
+                  </div>
+                  <div className={`mt-1 text-sm font-semibold ${h48 ? "text-amber-300" : "text-slate-400"}`}>
+                    {h48}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2">
+                  <div className="text-[6px] font-semibold uppercase text-slate-600">
+                    49-72h
+                  </div>
+                  <div className={`mt-1 text-sm font-semibold ${h72 ? "text-sky-300" : "text-slate-400"}`}>
+                    {h72}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2">
+                  <div className="text-[6px] font-semibold uppercase text-slate-600">
+                    S/Prazo
+                  </div>
+                  <div className={`mt-1 text-sm font-semibold ${semPrazo ? "text-amber-300" : "text-slate-400"}`}>
+                    {semPrazo}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-2 flex items-center justify-between gap-2 text-[8px] text-slate-500">
+                <span>
+                  {abertas} pendência(s) aberta(s)
+                </span>
+
+                <span>
+                  {impedimentos} imped. · {acoes} ações venc. · {marcos} marcos atras.
+                </span>
+              </div>
+
+              <div className="mt-3 flex-1 rounded-xl border border-white/[0.06] bg-black/[0.10] px-3 py-2">
+                <div className="text-[7px] font-semibold uppercase tracking-[.12em] text-slate-600">
+                  Próxima ação
+                </div>
+
+                <div
+                  className={`mt-1 truncate text-[10px] font-semibold ${
+                    proximaAcao?.vencida
+                      ? "text-rose-300"
+                      : "text-sky-300"
+                  }`}
+                >
+                  {proximaAcao?.titulo ||
+                    "Nenhuma ação aberta"}
+                </div>
+
+                <div className="mt-1 flex items-center justify-between text-[8px] text-slate-600">
+                  <span>
+                    Maior tempo aberto: {aging} dia(s)
+                  </span>
+
+                  {proximaAcao?.prazo && (
+                    <span
+                      className={
+                        proximaAcao.vencida
+                          ? "text-rose-400"
+                          : ""
+                      }
+                    >
+                      {proximaAcao.vencida
+                        ? "Vencida"
+                        : "Prazo"}{" "}
+                      · {fmtDate(proximaAcao.prazo)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+
+        {rows.length === 0 && (
+          <div className="col-span-full flex min-h-[300px] items-center justify-center rounded-2xl border border-dashed border-white/[0.08]">
+            <div className="text-center">
+              <div className="text-sm font-semibold text-emerald-300">
+                Nenhuma pendência operacional
+              </div>
+
+              <div className="mt-1 text-xs text-slate-600">
+                Não existem pendências, impedimentos, ações vencidas ou marcos atrasados.
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+function RiskRanking({
+  items,
+  executiveById,
+  onOpenProjeto,
+}: {
+  items: Ranked[];
+  executiveById: Map<string, ExecutiveProject>;
+  onOpenProjeto: (id: string) => void;
+}) {
+  return (
+    <div className="min-w-[860px] divide-y divide-white/[0.07]">
+      {items.slice(0, 10).map((p, i) => {
+        const ex = executiveById.get(p.id);
+        const bloqueado = normalize(p.status) === "bloqueado";
+        const impedimentos = ex?.indicadores.impedimentosAbertos ?? 0;
+        const impedimentosCriticos = ex?.indicadores.impedimentosCriticos ?? 0;
+        const pendencias = ex?.indicadores.pendenciasVencidas ?? 0;
+        const acoes = ex?.indicadores.acoesVencidas ?? 0;
+        const marcos = ex?.indicadores.marcosAtrasados ?? 0;
+
+        return (
+          <button key={p.id} onClick={() => onOpenProjeto(p.id)} className="grid w-full grid-cols-[38px_minmax(190px,1.2fr)_110px_120px_115px_minmax(180px,1fr)] items-center gap-3 px-2 py-[clamp(9px,.9vh,14px)] text-left transition hover:bg-white/[0.025]">
+            <span className="text-xs font-medium text-slate-600">{String(i + 1).padStart(2, "0")}</span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2"><span className="truncate text-[clamp(13px,.9vw,17px)] font-semibold text-white">{p.nome}</span><span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${healthClasses[p.health]}`}>{p.health === "critical" ? "Crítico" : "Atenção"}</span></div>
+              <div className="mt-1 truncate text-[11px] text-slate-500">{p.reasons.join(" • ") || "Pressão operacional"}</div>
+            </div>
+            <div><div className="text-[9px] uppercase tracking-[.12em] text-slate-600">Bloqueio</div><div className={`mt-1 text-sm font-semibold ${bloqueado || impedimentos ? "text-rose-300" : "text-emerald-300"}`}>{bloqueado ? "Bloqueado" : impedimentos ? `${impedimentos} imped.` : "Livre"}</div>{impedimentosCriticos > 0 && <div className="text-[9px] text-rose-400">{impedimentosCriticos} crítico(s)</div>}</div>
+            <div><div className="text-[9px] uppercase tracking-[.12em] text-slate-600">Aging / atraso</div><div className={`mt-1 text-sm font-semibold ${p.lateDays ? "text-rose-300" : "text-slate-300"}`}>{p.lateDays ? `${p.lateDays} dias` : "Sem atraso"}</div></div>
+            <div className="min-w-0"><div className="text-[9px] uppercase tracking-[.12em] text-slate-600">Responsável</div><div className="mt-1 truncate text-xs font-medium text-slate-300">{p.responsavel_nome || "Sem responsável"}</div></div>
+            <div className="min-w-0"><div className="text-[9px] uppercase tracking-[.12em] text-slate-600">Impacto operacional</div><div className="mt-1 truncate text-xs font-medium text-amber-300">{[pendencias ? `${pendencias} pend. venc.` : "", acoes ? `${acoes} ação(ões) venc.` : "", marcos ? `${marcos} marco(s) atras.` : ""].filter(Boolean).join(" • ") || "Criticidade por prazo/prioridade"}</div><div className="mt-0.5 truncate text-[9px] text-slate-600">Próxima ação: {ex?.proximaAcao?.titulo || "não cadastrada"}</div></div>
+          </button>
+        );
+      })}
+      {items.length === 0 && <div className="py-14 text-center text-sm text-slate-500">Nenhum risco ou bloqueio identificado.</div>}
+    </div>
+  );
+}
+
+function ProblemRanking({
+  items,
+  executiveById,
+  onOpenProjeto,
+}: {
+  items: Ranked[];
+  executiveById: Map<string, ExecutiveProject>;
+  onOpenProjeto: (id: string) => void;
+}) {
+  return (
+    <div className="min-w-[860px] divide-y divide-white/[0.07]">
+      {items.slice(0, 10).map((p, i) => {
+        const ex = executiveById.get(p.id);
+        const pendencias = ex?.indicadores.pendenciasVencidas ?? 0;
+        const impedimentos = ex?.indicadores.impedimentosAbertos ?? 0;
+        const acoes = ex?.indicadores.acoesVencidas ?? 0;
+        const marcos = ex?.indicadores.marcosAtrasados ?? 0;
+        const ocorrencias = pendencias + impedimentos + acoes + marcos;
+
+        return (
+          <button
+            key={p.id}
+            onClick={() => onOpenProjeto(p.id)}
+            className="grid w-full grid-cols-[38px_minmax(190px,1.25fr)_105px_105px_125px_minmax(190px,1fr)] items-center gap-3 px-2 py-[clamp(9px,.9vh,14px)] text-left transition hover:bg-white/[0.025]"
+          >
+            <span className="text-xs font-medium text-slate-600">{String(i + 1).padStart(2, "0")}</span>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-[clamp(13px,.9vw,17px)] font-semibold text-white">{p.nome}</span>
+                <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${healthClasses[p.health]}`}>
+                  {p.health === "critical" ? "Crítico" : p.health === "attention" ? "Atenção" : "Estável"}
+                </span>
+              </div>
+              <div className="mt-1 truncate text-[11px] text-slate-500">
+                {p.reasons.join(" • ") || "Sem motivo crítico"}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[9px] uppercase tracking-[.12em] text-slate-600">Atraso</div>
+              <div className={`mt-1 text-sm font-semibold ${p.lateDays ? "text-rose-300" : "text-emerald-300"}`}>
+                {p.lateDays ? `${p.lateDays} dias` : "No prazo"}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[9px] uppercase tracking-[.12em] text-slate-600">Ocorrências</div>
+              <div className={`mt-1 text-sm font-semibold ${ocorrencias ? "text-amber-300" : "text-slate-400"}`}>
+                {ocorrencias}
+              </div>
+              <div className="text-[9px] text-slate-600">P {pendencias} · I {impedimentos} · A {acoes} · M {marcos}</div>
+            </div>
+
+            <div className="min-w-0">
+              <div className="text-[9px] uppercase tracking-[.12em] text-slate-600">Responsável</div>
+              <div className="mt-1 truncate text-xs font-medium text-slate-300">{p.responsavel_nome || "Sem responsável"}</div>
+            </div>
+
+            <div className="min-w-0">
+              <div className="text-[9px] uppercase tracking-[.12em] text-slate-600">Próxima ação</div>
+              <div className={`mt-1 truncate text-xs font-medium ${ex?.proximaAcao?.vencida ? "text-rose-300" : "text-sky-300"}`}>
+                {ex?.proximaAcao?.titulo || "Nenhuma ação aberta"}
+              </div>
+              {ex?.proximaAcao?.prazo && (
+                <div className="mt-0.5 text-[9px] text-slate-600">
+                  {ex.proximaAcao.vencida ? "Vencida" : "Prazo"} · {fmtDate(ex.proximaAcao.prazo)}
+                </div>
+              )}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function ControlTowerLive({ projetos, onOpenProjeto, onExit }: Props) {
+  const [slide, setSlide] = useState(0);
+  const [auto, setAuto] = useState(true);
+  const [rotationSeconds, setRotationSeconds] = useState(15);
+  const [now, setNow] = useState(new Date());
+  const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [executive, setExecutive] = useState<ExecutiveDashboard | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [connected, setConnected] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const loadExecutive = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      const response = await fetch("/api/dashboard/executivo", { cache: "no-store", credentials: "same-origin" });
+      const body = await response.json();
+      if (!response.ok || !body?.success) throw new Error(body?.error || `Falha HTTP ${response.status}`);
+      setExecutive(body as ExecutiveDashboard);
+      setLiveError(null);
+      setConnected(true);
+      setLastUpdate(new Date(body.atualizadoEm || Date.now()));
+    } catch (error) {
+      setLiveError(error instanceof Error ? error.message : "Falha ao atualizar dados executivos.");
+      setConnected(false);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  const exit = useCallback(() => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
+    onExit();
+  }, [onExit]);
+
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") exit(); };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [exit]);
+
+  useEffect(() => {
+    const saved = Number(
+      window.localStorage.getItem("controlTowerLiveRotationSeconds")
+    );
+
+    if ([10, 15, 30, 60].includes(saved)) {
+      setRotationSeconds(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    const syncFullscreen = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+
+    const online = () => {
+      setConnected(true);
+      void loadExecutive();
+    };
+
+    const offline = () => {
+      setConnected(false);
+    };
+
+    setConnected(navigator.onLine);
+    syncFullscreen();
+
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreen);
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+  }, [loadExecutive]);
+
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    void loadExecutive();
+    const t = window.setInterval(() => void loadExecutive(), 60000);
+    return () => window.clearInterval(t);
+  }, [loadExecutive]);
+
+  useEffect(() => {
+    if (!auto) return;
+
+    const t = window.setInterval(
+      () => {
+        setSlide(
+          (s) => (s + 1) % slides.length
+        );
+      },
+      rotationSeconds * 1000
+    );
+
+    return () => window.clearInterval(t);
+  }, [auto, rotationSeconds]);
+
+  const localById = useMemo(() => new Map(projetos.map((p) => [p.id, p])), [projetos]);
+
+  const ranked = useMemo<Ranked[]>(() => {
+    if (!executive) return projetos.filter((p) => !isClosed(p)).map(rankProject).sort((a,b)=>b.score-a.score);
+    return executive.projetos.map((item) => {
+      const local = localById.get(item.id);
+      if (!local) return null;
+      const health: Health = item.saude === "Crítico" ? "critical" : item.saude === "Atenção" ? "attention" : "stable";
+      return {
+        ...local,
+        status: item.status ?? local.status,
+        prioridade: item.prioridade ?? local.prioridade,
+        percentual: Number(item.percentual ?? local.percentual ?? 0),
+        data_fim: item.data_fim ?? local.data_fim,
+        responsavel_nome: item.responsavel?.nome ?? local.responsavel_nome,
+        score: item.score, lateDays: item.lateDays ?? item.indicadores.diasAtraso,
+        reasons: item.motivos ?? [], health,
+      } as Ranked;
+    }).filter((x): x is Ranked => x !== null).sort((a,b)=>b.score-a.score);
+  }, [executive, localById, projetos]);
+
+  const executiveById = useMemo(() => new Map((executive?.projetos ?? []).map(p=>[p.id,p])), [executive]);
+  const critical = ranked.filter((p) => p.health === "critical");
+  const attention = ranked.filter((p) => p.health === "attention");
+  const stable = ranked.filter((p) => p.health === "stable");
+  const delayed = ranked.filter((p) => p.lateDays > 0);
+  const blocked = ranked.filter((p) => normalize(p.status) === "bloqueado");
+  const noDeadline = ranked.filter((p) => !p.data_fim);
+  const avg = ranked.length ? Math.round(ranked.reduce((a,p)=>a+(p.percentual||0),0)/ranked.length) : 0;
+  const healthPct = ranked.length ? Math.round((stable.length/ranked.length)*100) : 100;
+  const summary = executive?.resumo ?? {
+    total: projetos.length, ativos: ranked.length, estaveis: stable.length, atencao: attention.length,
+    criticos: critical.length, atrasados: delayed.length, bloqueados: blocked.length, semPrazo: noDeadline.length,
+    pendenciasAbertas: 0,
+    pendenciasVencidas: 0,
+    pendenciasHoje: 0,
+    pendencias48h: 0,
+    pendencias72h: 0,
+    pendenciasSemPrazo: 0,
+    maiorAgingPendenciaDias: 0,
+    impedimentos: 0,
+    impedimentosCriticos: 0,
+    marcosAtrasados: 0,
+    acoesAbertas: 0,
+    acoesVencidas: 0,
+    proximosMarcos: 0,
+  };
+
+  const areas = useMemo(() => {
+    const names = ["Comercial","Implantação","Desenvolvimento","Suporte"];
+    return names.map(name => {
+      const n=normalize(name);
+      const items=ranked.filter(p=>normalize(p.setor).includes(n)||normalize(p.fase_origem).includes(n)||normalize(p.etapa?.nome).includes(n));
+      return {name,total:items.length,critical:items.filter(p=>p.health==="critical").length,delayed:items.filter(p=>p.lateDays>0).length,blocked:items.filter(p=>normalize(p.status)==="bloqueado").length};
+    });
+  },[ranked]);
+
+  const owners = useMemo(() => {
+    const map = new Map<string, Ranked[]>();
+
+    ranked.forEach((p) => {
+      const nome =
+        p.responsavel_nome?.trim() ||
+        "Sem responsável";
+
+      const lista =
+        map.get(nome) ?? [];
+
+      lista.push(p);
+      map.set(nome, lista);
+    });
+
+    return [...map.entries()]
+      .map(([name, items]) => {
+        let pendencias = 0;
+        let impedimentos = 0;
+        let riscos = 0;
+        let acoes = 0;
+        let marcos = 0;
+
+        items.forEach((p) => {
+          const ex =
+            executiveById.get(p.id);
+
+          pendencias +=
+            ex?.indicadores.pendenciasVencidas ?? 0;
+
+          impedimentos +=
+            ex?.indicadores.impedimentosAbertos ?? 0;
+
+          riscos +=
+            ex?.indicadores.impedimentosCriticos ?? 0;
+
+          acoes +=
+            ex?.indicadores.acoesVencidas ?? 0;
+
+          marcos +=
+            ex?.indicadores.marcosAtrasados ?? 0;
+        });
+
+        const critical =
+          items.filter(
+            (p) =>
+              p.health === "critical"
+          ).length;
+
+        const attention =
+          items.filter(
+            (p) =>
+              p.health === "attention"
+          ).length;
+
+        const delayed =
+          items.filter(
+            (p) =>
+              p.lateDays > 0
+          ).length;
+
+        const occurrences =
+          pendencias +
+          impedimentos +
+          acoes +
+          marcos;
+
+        /*
+         * PRESSÃO OPERACIONAL
+         *
+         * Projeto em carteira       = 10
+         * Projeto crítico           = +45
+         * Projeto em atenção        = +20
+         * Dias de atraso            = até +30
+         * Pendência vencida         = +18
+         * Impedimento aberto        = +22
+         * Risco/impedimento crítico = +28
+         * Ação vencida              = +15
+         * Marco atrasado            = +12
+         */
+        const pressure =
+          items.reduce(
+            (total, p) => {
+              const ex =
+                executiveById.get(p.id);
+
+              const pend =
+                ex?.indicadores
+                  .pendenciasVencidas ?? 0;
+
+              const imped =
+                ex?.indicadores
+                  .impedimentosAbertos ?? 0;
+
+              const riscosCriticos =
+                ex?.indicadores
+                  .impedimentosCriticos ?? 0;
+
+              const actions =
+                ex?.indicadores
+                  .acoesVencidas ?? 0;
+
+              const milestones =
+                ex?.indicadores
+                  .marcosAtrasados ?? 0;
+
+              return (
+                total +
+                10 +
+                (p.health === "critical"
+                  ? 45
+                  : p.health === "attention"
+                    ? 20
+                    : 0) +
+                Math.min(
+                  30,
+                  p.lateDays
+                ) +
+                pend * 18 +
+                imped * 22 +
+                riscosCriticos * 28 +
+                actions * 15 +
+                milestones * 12
+              );
+            },
+            0
+          );
+
+        return {
+          name,
+          total: items.length,
+          critical,
+          attention,
+          delayed,
+          pendencias,
+          impedimentos,
+          riscos,
+          acoes,
+          marcos,
+          occurrences,
+          pressure,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.pressure -
+          a.pressure
+      );
+  }, [ranked, executiveById]);
+  const operationalProblems = useMemo(() => ranked.filter(p => {
+    const x=executiveById.get(p.id);
+    return !!x && (x.indicadores.pendenciasVencidas>0 || x.indicadores.impedimentosAbertos>0 || x.indicadores.marcosAtrasados>0 || x.indicadores.acoesVencidas>0);
+  }),[executiveById,ranked]);
+
+  const milestones = useMemo(() => executive?.proximosMarcos ?? [], [executive]);
+
+  const goFullscreen = async () => {
+    if (!document.fullscreenElement) {
+      await document.documentElement
+        .requestFullscreen()
+        .catch(() => undefined);
+    } else {
+      await document
+        .exitFullscreen()
+        .catch(() => undefined);
+    }
+  };
+
+  const goTvMode = async () => {
+    setAuto(true);
+
+    if (!document.fullscreenElement) {
+      await document.documentElement
+        .requestFullscreen()
+        .catch(() => undefined);
+    }
+
+    void loadExecutive();
+  };
+
+  const next = () => setSlide((s) => (s + 1) % slides.length);
+  const prev = () => setSlide((s) => (s - 1 + slides.length) % slides.length);
+  const current = slides[slide].key as SlideKey;
+
+  const renderSlide = () => {
+    if (current === "agora") return <>
+      <div className="grid shrink-0 grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-6">
+        <Kpi label="Projetos ativos" value={summary.ativos} helper={`${avg}% progresso médio`} />
+        <Kpi label="Críticos" value={summary.criticos} helper="Ação imediata" tone="rose" />
+        <Kpi label="Em atenção" value={summary.atencao} helper="Monitorar de perto" tone="amber" />
+        <Kpi label="Atrasados" value={summary.atrasados} helper="Prazo ultrapassado" tone="rose" />
+        <Kpi label="Bloqueados" value={summary.bloqueados} helper="Fluxo interrompido" tone={summary.bloqueados ? "rose" : "emerald"} />
+        <Kpi label="Sem prazo" value={summary.semPrazo} helper="Previsão necessária" tone="amber" />
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[.72fr_1.28fr]">
+        <Panel title="Saúde da carteira" subtitle="Percentual dos projetos ativos classificados como estáveis">
+          <div className="flex h-full flex-col justify-center">
+            <div className="text-[clamp(42px,5vw,82px)] font-semibold tracking-[-.07em] text-white">{healthPct}<span className="ml-2 text-2xl text-slate-500">%</span></div>
+            <div className="mt-5 h-2.5 overflow-hidden rounded-full bg-black/40"><div className="h-full rounded-full bg-emerald-400" style={{width:`${healthPct}%`}}/></div>
+            <div className="mt-5 grid grid-cols-3 gap-2 text-center"><Kpi label="Crítico" value={summary.criticos} helper="" tone="rose"/><Kpi label="Atenção" value={summary.atencao} helper="" tone="amber"/><Kpi label="Estável" value={summary.estaveis} helper="" tone="emerald"/></div>
+          </div>
+        </Panel>
+        <Panel title="Atenção imediata" subtitle="Projetos com maior criticidade neste momento"><ProjectRows items={ranked} limit={7}/></Panel>
+      </div>
+    </>;
+
+    if (current === "problemas") return <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.58fr)_minmax(250px,.42fr)]"><Panel title="Mapa de Problemas" subtitle="Ranking executivo: criticidade, motivo, atraso, ocorrências, responsável e próxima ação"><ProblemRanking items={ranked} executiveById={executiveById} onOpenProjeto={onOpenProjeto}/></Panel><div className="grid min-h-0 grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-1 xl:grid-rows-5"><Kpi label="Críticos" value={summary.criticos} helper="Decisão imediata" tone="rose"/><Kpi label="Atrasados" value={summary.atrasados} helper="Projetos fora do prazo" tone="rose"/><Kpi label="Pendências vencidas" value={summary.pendenciasVencidas} helper="Pendências reais" tone="amber"/><Kpi label="Ações vencidas" value={summary.acoesVencidas} helper="Ações reais" tone="amber"/><Kpi label="Marcos atrasados" value={summary.marcosAtrasados} helper="Marcos reais" tone="rose"/></div></div>;
+
+    if (current === "riscos") {
+      const riskItems = ranked.filter((p) => {
+        const ex = executiveById.get(p.id);
+        return p.health === "critical" || normalize(p.status) === "bloqueado" || (ex?.indicadores.impedimentosAbertos ?? 0) > 0 || (ex?.indicadores.impedimentosCriticos ?? 0) > 0;
+      });
+      return <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.58fr)_minmax(250px,.42fr)]"><Panel title="Riscos e bloqueios" subtitle="Criticidade, bloqueio, impacto, responsável, aging e próxima ação"><RiskRanking items={riskItems} executiveById={executiveById} onOpenProjeto={onOpenProjeto}/></Panel><div className="grid min-h-0 grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-1 xl:grid-rows-5"><Kpi label="Riscos críticos" value={critical.length} helper="Projetos críticos" tone="rose"/><Kpi label="Bloqueados" value={summary.bloqueados} helper="Status bloqueado" tone={summary.bloqueados ? "rose" : "emerald"}/><Kpi label="Impedimentos" value={summary.impedimentos} helper={`${summary.impedimentosCriticos} críticos`} tone={summary.impedimentosCriticos ? "rose" : "amber"}/><Kpi label="Atrasados" value={summary.atrasados} helper="Aging por prazo" tone="rose"/><Kpi label="Ocorrências vencidas" value={summary.pendenciasVencidas + summary.acoesVencidas + summary.marcosAtrasados} helper="Pendências + ações + marcos" tone="amber"/></div></div>;
+    }
+
+    if (current === "pendencias")
+      return (
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_clamp(250px,21vw,370px)] gap-3">
+          <Panel
+            title="Pendências e Aging"
+            subtitle="Vencidas, hoje, 48h, 72h, sem prazo e maior tempo em aberto"
+          >
+            <PendingAgingRanking
+              items={ranked}
+              executiveById={executiveById}
+              onOpenProjeto={onOpenProjeto}
+            />
+          </Panel>
+
+          <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1">
+            <div className="shrink-0">
+              <Kpi
+                label="Pendências abertas"
+                value={summary.pendenciasAbertas}
+                helper={`Maior aging: ${summary.maiorAgingPendenciaDias} dia(s)`}
+                tone="sky"
+              />
+            </div>
+
+            <div className="shrink-0">
+              <Kpi
+                label="Pendências vencidas"
+                value={summary.pendenciasVencidas}
+                helper="Prazo ultrapassado"
+                tone="rose"
+              />
+            </div>
+
+            <div className="shrink-0">
+              <Kpi
+                label="Vence hoje"
+                value={summary.pendenciasHoje}
+                helper="Ação no mesmo dia"
+                tone={summary.pendenciasHoje ? "amber" : "emerald"}
+              />
+            </div>
+
+            <div className="shrink-0">
+              <Kpi
+                label="Próximas 48h"
+                value={summary.pendencias48h}
+                helper="Vence em 1 ou 2 dias"
+                tone={summary.pendencias48h ? "amber" : "emerald"}
+              />
+            </div>
+
+            <div className="shrink-0">
+              <Kpi
+                label="De 49 a 72h"
+                value={summary.pendencias72h}
+                helper="Vence no terceiro dia"
+                tone={summary.pendencias72h ? "sky" : "emerald"}
+              />
+            </div>
+
+            <div className="shrink-0">
+              <Kpi
+                label="Sem prazo"
+                value={summary.pendenciasSemPrazo}
+                helper="Pendências sem previsão"
+                tone={summary.pendenciasSemPrazo ? "amber" : "emerald"}
+              />
+            </div>
+          </div>
+        </div>
+      );
+    if (current === "areas") {
+      const areas = [
+        "Comercial",
+        "Implantação",
+        "Desenvolvimento",
+        "Suporte",
+      ];
+
+      const dadosAreas = areas.map((area) => {
+        const projetosArea = ranked.filter(
+          (p) => normalize(p.setor) === normalize(area)
+        );
+
+        const criticos = projetosArea.filter(
+          (p) => p.health === "critical"
+        ).length;
+
+        const atencao = projetosArea.filter(
+          (p) => p.health === "attention"
+        ).length;
+
+        const estaveis = projetosArea.filter(
+          (p) => p.health === "stable"
+        ).length;
+
+        const atrasados = projetosArea.filter(
+          (p) => p.lateDays > 0
+        ).length;
+
+        const bloqueados = projetosArea.filter(
+          (p) => normalize(p.status) === "bloqueado"
+        ).length;
+
+        const semPrazo = projetosArea.filter(
+          (p) => !p.data_fim
+        ).length;
+
+        const ocorrencias = projetosArea.reduce(
+          (total, p) => {
+            const ex = executiveById.get(p.id);
+
+            return (
+              total +
+              (ex?.indicadores.pendenciasVencidas ?? 0) +
+              (ex?.indicadores.impedimentosAbertos ?? 0) +
+              (ex?.indicadores.acoesVencidas ?? 0) +
+              (ex?.indicadores.marcosAtrasados ?? 0)
+            );
+          },
+          0
+        );
+
+        const progresso =
+          projetosArea.length > 0
+            ? Math.round(
+                projetosArea.reduce(
+                  (total, p) =>
+                    total +
+                    Number(p.percentual || 0),
+                  0
+                ) / projetosArea.length
+              )
+            : 0;
+
+        const pressao =
+          criticos * 100 +
+          atencao * 50 +
+          atrasados * 20 +
+          bloqueados * 40 +
+          ocorrencias * 10;
+
+        return {
+          area,
+          projetosArea,
+          total: projetosArea.length,
+          criticos,
+          atencao,
+          estaveis,
+          atrasados,
+          bloqueados,
+          semPrazo,
+          ocorrencias,
+          progresso,
+          pressao,
+        };
+      });
+
+      const maiorPressao = Math.max(
+        1,
+        ...dadosAreas.map((a) => a.pressao)
+      );
+
+      return (
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_clamp(230px,17vw,310px)] gap-3">
+          <Panel
+            title="Radar das Áreas"
+            subtitle="Comercial, Implantação, Desenvolvimento e Suporte na mesma visão operacional"
+          >
+            <div className="grid h-full min-h-0 grid-cols-1 gap-3 overflow-y-auto pr-1 lg:grid-cols-2">
+              {dadosAreas.map((area) => {
+                const percentualPressao = Math.round(
+                  (area.pressao / maiorPressao) * 100
+                );
+
+                const statusArea =
+                  area.criticos > 0
+                    ? "Crítica"
+                    : area.atencao > 0 ||
+                        area.atrasados > 0
+                      ? "Atenção"
+                      : "Estável";
+
+                const statusClass =
+                  statusArea === "Crítica"
+                    ? "border-rose-400/25 bg-rose-400/10 text-rose-300"
+                    : statusArea === "Atenção"
+                      ? "border-amber-400/25 bg-amber-400/10 text-amber-300"
+                      : "border-emerald-400/25 bg-emerald-400/10 text-emerald-300";
+
+                return (
+                  <div
+                    key={area.area}
+                    className="
+                      relative
+                      overflow-hidden
+                      rounded-2xl
+                      border
+                      border-white/[0.08]
+                      bg-black/[0.12]
+                      p-4
+                    "
+                  >
+                    <div
+                      className={`absolute left-0 top-0 h-full w-[3px] ${
+                        statusArea === "Crítica"
+                          ? "bg-rose-400"
+                          : statusArea === "Atenção"
+                            ? "bg-amber-400"
+                            : "bg-emerald-400"
+                      }`}
+                    />
+
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[9px] font-semibold uppercase tracking-[.15em] text-slate-600">
+                          Área operacional
+                        </div>
+
+                        <div className="mt-1 text-lg font-semibold text-white">
+                          {area.area}
+                        </div>
+                      </div>
+
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase ${statusClass}`}
+                      >
+                        {statusArea}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div className="rounded-xl border border-white/[0.06] bg-black/10 p-2.5">
+                        <div className="text-[7px] font-semibold uppercase tracking-[.1em] text-slate-600">
+                          Projetos
+                        </div>
+                        <div className="mt-1 text-xl font-semibold text-white">
+                          {area.total}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/[0.06] bg-black/10 p-2.5">
+                        <div className="text-[7px] font-semibold uppercase tracking-[.1em] text-slate-600">
+                          Críticos
+                        </div>
+                        <div className="mt-1 text-xl font-semibold text-rose-300">
+                          {area.criticos}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/[0.06] bg-black/10 p-2.5">
+                        <div className="text-[7px] font-semibold uppercase tracking-[.1em] text-slate-600">
+                          Atenção
+                        </div>
+                        <div className="mt-1 text-xl font-semibold text-amber-300">
+                          {area.atencao}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/[0.06] bg-black/10 p-2.5">
+                        <div className="text-[7px] font-semibold uppercase tracking-[.1em] text-slate-600">
+                          Estáveis
+                        </div>
+                        <div className="mt-1 text-xl font-semibold text-emerald-300">
+                          {area.estaveis}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div>
+                        <div className="text-[8px] uppercase tracking-[.1em] text-slate-600">
+                          Atrasados
+                        </div>
+                        <div className={`mt-1 text-sm font-semibold ${area.atrasados ? "text-rose-300" : "text-slate-400"}`}>
+                          {area.atrasados}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[8px] uppercase tracking-[.1em] text-slate-600">
+                          Bloqueados
+                        </div>
+                        <div className={`mt-1 text-sm font-semibold ${area.bloqueados ? "text-rose-300" : "text-slate-400"}`}>
+                          {area.bloqueados}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[8px] uppercase tracking-[.1em] text-slate-600">
+                          Sem prazo
+                        </div>
+                        <div className={`mt-1 text-sm font-semibold ${area.semPrazo ? "text-amber-300" : "text-slate-400"}`}>
+                          {area.semPrazo}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[8px] uppercase tracking-[.1em] text-slate-600">
+                          Ocorrências
+                        </div>
+                        <div className={`mt-1 text-sm font-semibold ${area.ocorrencias ? "text-amber-300" : "text-slate-400"}`}>
+                          {area.ocorrencias}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between text-[8px] uppercase tracking-[.1em] text-slate-600">
+                        <span>Pressão operacional</span>
+                        <span>{percentualPressao}%</span>
+                      </div>
+
+                      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-black/30">
+                        <div
+                          className={`h-full rounded-full ${
+                            statusArea === "Crítica"
+                              ? "bg-rose-400"
+                              : statusArea === "Atenção"
+                                ? "bg-amber-400"
+                                : "bg-emerald-400"
+                          }`}
+                          style={{
+                            width: `${Math.max(
+                              area.pressao > 0
+                                ? 6
+                                : 0,
+                              percentualPressao
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between border-t border-white/[0.06] pt-3">
+                      <div className="text-[9px] text-slate-500">
+                        Progresso médio
+                      </div>
+
+                      <div className="text-sm font-semibold text-sky-300">
+                        {area.progresso}%
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Panel>
+
+          <div className="grid min-h-0 grid-cols-2 gap-3 xl:grid-cols-1 xl:grid-rows-4">
+            {dadosAreas.map((area) => (
+              <div
+                key={area.area}
+                className="
+                  rounded-2xl
+                  border
+                  border-white/[0.08]
+                  bg-black/[0.12]
+                  p-4
+                "
+              >
+                <div className="text-[9px] font-semibold uppercase tracking-[.14em] text-slate-500">
+                  {area.area}
+                </div>
+
+                <div className="mt-2 flex items-end justify-between">
+                  <div>
+                    <div className="text-3xl font-semibold text-white">
+                      {area.total}
+                    </div>
+                    <div className="mt-1 text-[9px] text-slate-500">
+                      projetos
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <div
+                      className={`text-xl font-semibold ${
+                        area.criticos
+                          ? "text-rose-300"
+                          : area.atencao
+                            ? "text-amber-300"
+                            : "text-emerald-300"
+                      }`}
+                    >
+                      {area.criticos
+                        ? `${area.criticos} crítico(s)`
+                        : area.atencao
+                          ? `${area.atencao} atenção`
+                          : "Estável"}
+                    </div>
+
+                    <div className="mt-1 text-[9px] text-slate-600">
+                      {area.atrasados} atrasado(s) ·{" "}
+                      {area.ocorrencias} ocorrência(s)
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    if (current === "marcos") {
+      const futuros = [...(executive?.proximosMarcos ?? [])]
+        .filter((m) => !!m.data_prevista)
+        .sort(
+          (a, b) =>
+            new Date(a.data_prevista!).getTime() -
+            new Date(b.data_prevista!).getTime()
+        );
+
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
+
+      const em7Dias = new Date(hoje);
+      em7Dias.setDate(em7Dias.getDate() + 7);
+
+      const em15Dias = new Date(hoje);
+      em15Dias.setDate(em15Dias.getDate() + 15);
+
+      const proximos7 = futuros.filter((m) => {
+        if (!m.data_prevista) return false;
+        const data = new Date(`${m.data_prevista}T00:00:00`);
+        return data >= hoje && data <= em7Dias;
+      });
+
+      const proximos15 = futuros.filter((m) => {
+        if (!m.data_prevista) return false;
+        const data = new Date(`${m.data_prevista}T00:00:00`);
+        return data > em7Dias && data <= em15Dias;
+      });
+
+      const goLives = futuros.filter((m) => {
+        const nome = normalize(m.nome);
+
+        return (
+          nome.includes("go-live") ||
+          nome.includes("go live") ||
+          nome.includes("golive")
+        );
+      });
+
+      const todosEventos = futuros.slice(0, 16);
+
+      return (
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_clamp(230px,17vw,310px)] gap-3">
+          <Panel
+            title="Timeline — próximos eventos e marcos"
+            subtitle="Go-Lives, homologações, treinamentos, entregas e marcos reais dos próximos 7/15 dias"
+          >
+            <div className="h-full min-h-0 overflow-y-auto pr-1">
+              {todosEventos.length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 pb-3 min-[900px]:grid-cols-2 xl:grid-cols-3 min-[1700px]:grid-cols-4">
+                  {todosEventos.map((marco, index) => {
+                    const data = marco.data_prevista
+                      ? new Date(`${marco.data_prevista}T00:00:00`)
+                      : null;
+
+                    const diff =
+                      data
+                        ? Math.ceil(
+                            (data.getTime() - hoje.getTime()) /
+                              86400000
+                          )
+                        : null;
+
+                    const urgente =
+                      diff !== null &&
+                      diff >= 0 &&
+                      diff <= 7;
+
+                    const proximo =
+                      diff !== null &&
+                      diff > 7 &&
+                      diff <= 15;
+
+                    const nomeNormalizado = normalize(
+                      marco.nome
+                    );
+
+                    const tipo =
+                      nomeNormalizado.includes("go-live") ||
+                      nomeNormalizado.includes("go live") ||
+                      nomeNormalizado.includes("golive")
+                        ? "Go-Live"
+                        : nomeNormalizado.includes("homolog")
+                          ? "Homologação"
+                          : nomeNormalizado.includes("trein")
+                            ? "Treinamento"
+                            : nomeNormalizado.includes("entreg")
+                              ? "Entrega"
+                              : "Marco";
+
+                    const cor =
+                      tipo === "Go-Live"
+                        ? "text-emerald-300 border-emerald-400/25 bg-emerald-400/10"
+                        : tipo === "Homologação"
+                          ? "text-sky-300 border-sky-400/25 bg-sky-400/10"
+                          : tipo === "Treinamento"
+                            ? "text-violet-300 border-violet-400/25 bg-violet-400/10"
+                            : urgente
+                              ? "text-amber-300 border-amber-400/25 bg-amber-400/10"
+                              : "text-slate-300 border-white/[0.08] bg-white/[0.03]";
+
+                    return (
+                      <div
+                        key={marco.id}
+                        className="
+                          relative
+                          min-h-[190px]
+                          overflow-hidden
+                          rounded-2xl
+                          border
+                          border-white/[0.08]
+                          bg-black/[0.12]
+                          p-4
+                        "
+                      >
+                        <div
+                          className={`absolute left-0 top-0 h-full w-[3px] ${
+                            urgente
+                              ? "bg-amber-400"
+                              : proximo
+                                ? "bg-sky-400"
+                                : "bg-slate-600"
+                          }`}
+                        />
+
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="text-[9px] font-semibold uppercase tracking-[.15em] text-slate-600">
+                            #{String(index + 1).padStart(
+                              2,
+                              "0"
+                            )}
+                          </div>
+
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[8px] font-bold uppercase ${cor}`}
+                          >
+                            {tipo}
+                          </span>
+                        </div>
+
+                        <div className="mt-3">
+                          <div className="line-clamp-2 text-[14px] font-semibold text-white">
+                            {marco.nome}
+                          </div>
+
+                          <div className="mt-1 truncate text-[10px] text-slate-500">
+                            Marco cadastrado no projeto
+                          </div>
+                        </div>
+
+                        <div className="my-3 h-px bg-white/[0.06]" />
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="rounded-xl border border-white/[0.06] bg-black/10 p-2">
+                            <div className="text-[7px] uppercase tracking-[.1em] text-slate-600">
+                              Data
+                            </div>
+
+                            <div className="mt-1 text-xs font-semibold text-white">
+                              {fmtDate(
+                                marco.data_prevista
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/[0.06] bg-black/10 p-2">
+                            <div className="text-[7px] uppercase tracking-[.1em] text-slate-600">
+                              Janela
+                            </div>
+
+                            <div
+                              className={`mt-1 text-xs font-semibold ${
+                                urgente
+                                  ? "text-amber-300"
+                                  : proximo
+                                    ? "text-sky-300"
+                                    : "text-slate-300"
+                              }`}
+                            >
+                              {diff === 0
+                                ? "Hoje"
+                                : diff === 1
+                                  ? "Amanhã"
+                                  : diff !== null &&
+                                      diff > 0
+                                    ? `${diff} dias`
+                                    : "Futuro"}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 text-[9px] text-slate-600">
+                          Status:{" "}
+                          <span className="font-medium text-slate-400">
+                            {marco.status}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex h-full min-h-[320px] items-center justify-center">
+                  <div className="text-center">
+                    <div className="text-sm font-semibold text-slate-300">
+                      Nenhum marco futuro cadastrado
+                    </div>
+
+                    <div className="mt-1 text-xs text-slate-600">
+                      A timeline utiliza somente marcos reais
+                      cadastrados nos projetos.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Panel>
+
+          <div className="grid min-h-0 grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-1 xl:grid-rows-5">
+            <Kpi
+              label="Próximos 7 dias"
+              value={proximos7.length}
+              helper="Prioridade imediata"
+              tone={
+                proximos7.length
+                  ? "amber"
+                  : "emerald"
+              }
+            />
+
+            <Kpi
+              label="De 8 a 15 dias"
+              value={proximos15.length}
+              helper="Janela de preparação"
+              tone="sky"
+            />
+
+            <Kpi
+              label="Próximos Go-Lives"
+              value={goLives.length}
+              helper="Marcos identificados"
+              tone={
+                goLives.length
+                  ? "emerald"
+                  : "sky"
+              }
+            />
+
+            <Kpi
+              label="Marcos atrasados"
+              value={summary.marcosAtrasados}
+              helper="Prazo ultrapassado"
+              tone="rose"
+            />
+
+            <Kpi
+              label="Sem prazo"
+              value={summary.semPrazo}
+              helper="Projetos sem previsão"
+              tone="amber"
+            />
+          </div>
+        </div>
+      );
+    }
+    if (current === "capacidade") {
+      const maxPressure =
+        Math.max(
+          1,
+          ...owners.map(
+            (o) => o.pressure
+          )
+        );
+
+      const totalProjetosOwners =
+        owners.reduce(
+          (s, o) =>
+            s + o.total,
+          0
+        );
+
+      const totalCriticosOwners =
+        owners.reduce(
+          (s, o) =>
+            s + o.critical,
+          0
+        );
+
+      const totalAtrasadosOwners =
+        owners.reduce(
+          (s, o) =>
+            s + o.delayed,
+          0
+        );
+
+      const totalOcorrenciasOwners =
+        owners.reduce(
+          (s, o) =>
+            s + o.occurrences,
+          0
+        );
+
+      return (
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_clamp(270px,23vw,390px)] gap-3">
+          <Panel
+            title="Capacidade e pressão por responsável"
+            subtitle="Projetos, criticidade, atraso, ações, pendências, riscos e marcos reais"
+          >
+            <div className="h-full min-h-0 overflow-y-auto pr-1">
+              <div className="divide-y divide-white/[0.06]">
+                {owners
+                  .slice(0, 12)
+                  .map(
+                    (o, i) => {
+                      const percentual =
+                        Math.max(
+                          4,
+                          Math.round(
+                            (o.pressure /
+                              maxPressure) *
+                              100
+                          )
+                        );
+
+                      return (
+                        <div
+                          key={o.name}
+                          className="
+                            grid
+                            grid-cols-[36px_minmax(130px,1fr)_80px_80px_90px_100px_130px]
+                            items-center
+                            gap-3
+                            py-3
+                          "
+                        >
+                          <span className="text-xs text-slate-600">
+                            {String(
+                              i + 1
+                            ).padStart(
+                              2,
+                              "0"
+                            )}
+                          </span>
+
+                          <div className="min-w-0">
+                            <div className="truncate text-[14px] font-semibold text-slate-200">
+                              {o.name}
+                            </div>
+
+                            <div className="mt-1 truncate text-[9px] text-slate-600">
+                              {o.attention} atenção ·{" "}
+                              {o.pendencias} pend. venc. ·{" "}
+                              {o.marcos} marcos
+                            </div>
+                          </div>
+
+                          <div className="text-center">
+                            <div className="text-[8px] uppercase text-slate-600">
+                              Projetos
+                            </div>
+                            <div className="mt-1 text-sm font-semibold text-slate-300">
+                              {o.total}
+                            </div>
+                          </div>
+
+                          <div className="text-center">
+                            <div className="text-[8px] uppercase text-slate-600">
+                              Críticos
+                            </div>
+                            <div
+                              className={`mt-1 text-sm font-semibold ${
+                                o.critical
+                                  ? "text-rose-300"
+                                  : "text-slate-400"
+                              }`}
+                            >
+                              {o.critical}
+                            </div>
+                          </div>
+
+                          <div className="text-center">
+                            <div className="text-[8px] uppercase text-slate-600">
+                              Atrasados
+                            </div>
+                            <div
+                              className={`mt-1 text-sm font-semibold ${
+                                o.delayed
+                                  ? "text-rose-300"
+                                  : "text-emerald-300"
+                              }`}
+                            >
+                              {o.delayed}
+                            </div>
+                          </div>
+
+                          <div className="text-center">
+                            <div className="text-[8px] uppercase text-slate-600">
+                              Ocorrências
+                            </div>
+                            <div
+                              className={`mt-1 text-sm font-semibold ${
+                                o.occurrences
+                                  ? "text-amber-300"
+                                  : "text-emerald-300"
+                              }`}
+                            >
+                              {o.occurrences}
+                            </div>
+
+                            <div className="mt-0.5 text-[7px] text-slate-600">
+                              A{o.acoes} · I{o.impedimentos} · R{o.riscos}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[8px] uppercase tracking-[.1em] text-slate-600">
+                                Pressão
+                              </span>
+
+                              <span
+                                className={`text-sm font-semibold ${
+                                  percentual >= 75
+                                    ? "text-rose-300"
+                                    : percentual >= 45
+                                      ? "text-amber-300"
+                                      : "text-emerald-300"
+                                }`}
+                              >
+                                {o.pressure}
+                              </span>
+                            </div>
+
+                            <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/30">
+                              <div
+                                className={`h-full rounded-full ${
+                                  percentual >= 75
+                                    ? "bg-rose-400"
+                                    : percentual >= 45
+                                      ? "bg-amber-400"
+                                      : "bg-emerald-400"
+                                }`}
+                                style={{
+                                  width: `${percentual}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                  )}
+              </div>
+            </div>
+          </Panel>
+
+          <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1">
+            <div className="shrink-0">
+              <Kpi
+                label="Projetos distribuídos"
+                value={totalProjetosOwners}
+                helper={`${owners.length} responsável(is)`}
+                tone="sky"
+              />
+            </div>
+
+            <div className="shrink-0">
+              <Kpi
+                label="Projetos críticos"
+                value={totalCriticosOwners}
+                helper="Pressão imediata"
+                tone={
+                  totalCriticosOwners
+                    ? "rose"
+                    : "emerald"
+                }
+              />
+            </div>
+
+            <div className="shrink-0">
+              <Kpi
+                label="Projetos atrasados"
+                value={totalAtrasadosOwners}
+                helper="Carga por prazo"
+                tone={
+                  totalAtrasadosOwners
+                    ? "rose"
+                    : "emerald"
+                }
+              />
+            </div>
+
+            <div className="shrink-0">
+              <Kpi
+                label="Ocorrências reais"
+                value={totalOcorrenciasOwners}
+                helper="Pendências + impedimentos + ações + marcos"
+                tone={
+                  totalOcorrenciasOwners
+                    ? "amber"
+                    : "emerald"
+                }
+              />
+            </div>
+
+            {owners
+              .slice(0, 3)
+              .map((o) => (
+                <div
+                  key={o.name}
+                  className="shrink-0 rounded-2xl border border-white/[0.08] bg-black/[0.12] p-4"
+                >
+                  <div className="text-[8px] font-semibold uppercase tracking-[.15em] text-slate-600">
+                    Pressão operacional
+                  </div>
+
+                  <div className="mt-2 flex items-end justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-[15px] font-semibold text-white">
+                        {o.name}
+                      </div>
+
+                      <div className="mt-1 text-[9px] text-slate-500">
+                        {o.total} projeto(s) ·{" "}
+                        {o.critical} crítico(s) ·{" "}
+                        {o.delayed} atrasado(s)
+                      </div>
+                    </div>
+
+                    <div className="text-2xl font-semibold text-rose-300">
+                      {o.pressure}
+                    </div>
+                  </div>
+
+                  <div className="mt-2 text-[8px] text-slate-600">
+                    {o.acoes} ação(ões) vencida(s) ·{" "}
+                    {o.pendencias} pendência(s) vencida(s) ·{" "}
+                    {o.impedimentos} impedimento(s) ·{" "}
+                    {o.riscos} risco(s) crítico(s)
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      );
+    }
+    const guerraItems = ranked
+      .map((p) => {
+        const ex = executiveById.get(p.id);
+
+        const pendencias =
+          ex?.indicadores.pendenciasVencidas ?? 0;
+
+        const impedimentos =
+          ex?.indicadores.impedimentosAbertos ?? 0;
+
+        const acoes =
+          ex?.indicadores.acoesVencidas ?? 0;
+
+        const marcos =
+          ex?.indicadores.marcosAtrasados ?? 0;
+
+        const ocorrencias =
+          pendencias +
+          impedimentos +
+          acoes +
+          marcos;
+
+        return {
+          p,
+          ex,
+          pendencias,
+          impedimentos,
+          acoes,
+          marcos,
+          ocorrencias,
+        };
+      })
+      .filter(
+        (item) =>
+          item.p.health === "critical" ||
+          item.p.lateDays > 0 ||
+          item.ocorrencias > 0
+      )
+      .sort(
+        (a, b) =>
+          b.p.score - a.p.score ||
+          b.ocorrencias - a.ocorrencias ||
+          b.p.lateDays - a.p.lateDays
+      )
+      .slice(0, 12);
+
+    const totalOcorrenciasGuerra =
+      guerraItems.reduce(
+        (total, item) =>
+          total + item.ocorrencias,
+        0
+      );
+
+    const pressaoPorResponsavel =
+      new Map<
+        string,
+        {
+          nome: string;
+          projetos: number;
+          criticos: number;
+          score: number;
+        }
+      >();
+
+    guerraItems.forEach(({ p }) => {
+      const nome =
+        p.responsavel_nome?.trim() ||
+        "Sem responsável";
+
+      const atual =
+        pressaoPorResponsavel.get(nome) ?? {
+          nome,
+          projetos: 0,
+          criticos: 0,
+          score: 0,
+        };
+
+      atual.projetos += 1;
+
+      if (p.health === "critical") {
+        atual.criticos += 1;
+      }
+
+      atual.score += p.score;
+
+      pressaoPorResponsavel.set(
+        nome,
+        atual
+      );
+    });
+
+    const maiorPressaoGuerra =
+      Array.from(
+        pressaoPorResponsavel.values()
+      ).sort(
+        (a, b) =>
+          b.score - a.score ||
+          b.criticos - a.criticos
+      )[0];
+
+    const proximosGoLivesGuerra =
+      (executive?.proximosMarcos ?? [])
+        .filter((marco) => {
+          const nome =
+            normalize(marco.nome);
+
+          const proximosGoLivesGuerra =
+      (executive?.proximosMarcos ?? [])
+        .filter((marco) => {
+          const nome =
+            normalize(marco.nome);
+
+          return (
+            nome.includes("go-live") ||
+            nome.includes("go live") ||
+            nome.includes("golive")
+          );
+        })
+        .sort((a, b) => {
+          const da =
+            a.data_prevista
+              ? new Date(a.data_prevista).getTime()
+              : Number.MAX_SAFE_INTEGER;
+
+          const db =
+            b.data_prevista
+              ? new Date(b.data_prevista).getTime()
+              : Number.MAX_SAFE_INTEGER;
+
+          return da - db;
+        });
+
+    const proximoGoLiveGuerra =
+      proximosGoLivesGuerra[0] ?? null;
+    return (
+            nome.includes("go-live") ||
+            nome.includes("go live") ||
+            nome.includes("golive")
+          );
+        })
+        .sort((a, b) => {
+          const da =
+            a.data_prevista
+              ? new Date(a.data_prevista).getTime()
+              : Number.MAX_SAFE_INTEGER;
+
+          const db =
+            b.data_prevista
+              ? new Date(b.data_prevista).getTime()
+              : Number.MAX_SAFE_INTEGER;
+
+          return da - db;
+        });
+
+    const proximoGoLiveGuerra =
+      proximosGoLivesGuerra[0] ?? null;
+    return (
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_clamp(230px,17vw,310px)] gap-3">
+        <Panel
+          title="Resumo de Guerra"
+          subtitle="Projetos que exigem ação imediata, atrasos, ocorrências e próxima ação"
+        >
+          <div className="h-full min-h-0 overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 gap-3 pb-3 min-[900px]:grid-cols-2 xl:grid-cols-3">
+              {guerraItems.map(
+                (
+                  {
+                    p,
+                    ex,
+                    pendencias,
+                    impedimentos,
+                    acoes,
+                    marcos,
+                    ocorrencias,
+                  },
+                  index
+                ) => {
+                  const proximaAcao =
+                    ex?.proximaAcao;
+
+                  const acao =
+                    p.health === "critical"
+                      ? "AÇÃO IMEDIATA"
+                      : p.lateDays > 0
+                        ? "CORRIGIR ATRASO"
+                        : "TRATAR OCORRÊNCIAS";
+
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() =>
+                        onOpenProjeto(p.id)
+                      }
+                      className="
+                        group
+                        relative
+                        min-w-0
+                        w-full
+                        min-h-[190px]
+                        overflow-hidden
+                        rounded-2xl
+                        border
+                        border-white/[0.08]
+                        bg-black/[0.12]
+                        p-4
+                        text-left
+                        transition
+                        hover:-translate-y-0.5
+                        hover:border-sky-400/25
+                        hover:bg-white/[0.035]
+                      "
+                    >
+                      <div
+                        className={`absolute left-0 top-0 h-full w-[3px] ${
+                          p.health === "critical"
+                            ? "bg-rose-400"
+                            : "bg-amber-400"
+                        }`}
+                      />
+
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[8px] font-semibold uppercase tracking-[.15em] text-slate-600">
+                            #{String(
+                              index + 1
+                            ).padStart(2, "0")}
+                          </div>
+
+                          <div className="mt-1 truncate text-[15px] font-semibold text-white">
+                            {p.nome}
+                          </div>
+
+                          <div className="mt-1 truncate text-[9px] text-slate-500">
+                            {p.responsavel_nome ||
+                              "Sem responsável"}
+                          </div>
+                        </div>
+
+                        <span
+                          className={`shrink-0 rounded-full border px-2 py-1 text-[7px] font-bold ${
+                            p.health === "critical"
+                              ? "border-rose-400/25 bg-rose-400/10 text-rose-300"
+                              : "border-amber-400/25 bg-amber-400/10 text-amber-300"
+                          }`}
+                        >
+                          {acao}
+                        </span>
+                      </div>
+
+                      <div className="my-3 h-px bg-white/[0.06]" />
+
+                      <div className="grid grid-cols-4 gap-2">
+                        <div className="rounded-xl border border-white/[0.06] bg-black/10 p-2">
+                          <div className="text-[7px] uppercase text-slate-600">
+                            Atraso
+                          </div>
+
+                          <div
+                            className={`mt-1 text-sm font-semibold ${
+                              p.lateDays > 0
+                                ? "text-rose-300"
+                                : "text-emerald-300"
+                            }`}
+                          >
+                            {p.lateDays > 0
+                              ? `${p.lateDays}d`
+                              : "OK"}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-white/[0.06] bg-black/10 p-2">
+                          <div className="text-[7px] uppercase text-slate-600">
+                            Pend.
+                          </div>
+
+                          <div className="mt-1 text-sm font-semibold text-amber-300">
+                            {pendencias}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-white/[0.06] bg-black/10 p-2">
+                          <div className="text-[7px] uppercase text-slate-600">
+                            Ações
+                          </div>
+
+                          <div className="mt-1 text-sm font-semibold text-amber-300">
+                            {acoes}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-white/[0.06] bg-black/10 p-2">
+                          <div className="text-[7px] uppercase text-slate-600">
+                            Marcos
+                          </div>
+
+                          <div className="mt-1 text-sm font-semibold text-amber-300">
+                            {marcos}
+                          </div>
+                        </div>
+                      </div>
+
+                      {impedimentos > 0 && (
+                        <div className="mt-2 text-[8px] font-semibold text-rose-300">
+                          {impedimentos} impedimento(s) aberto(s)
+                        </div>
+                      )}
+
+                      <div className="mt-3 rounded-xl border border-white/[0.06] bg-black/10 p-2.5">
+                        <div className="text-[7px] font-semibold uppercase tracking-[.1em] text-slate-600">
+                          Próxima ação
+                        </div>
+
+                        <div
+                          className={`mt-1 truncate text-[10px] font-semibold ${
+                            proximaAcao?.vencida
+                              ? "text-rose-300"
+                              : "text-sky-300"
+                          }`}
+                        >
+                          {proximaAcao?.titulo ||
+                            "Nenhuma ação aberta"}
+                        </div>
+
+                        <div className="mt-1 flex items-center justify-between text-[8px] text-slate-600">
+                          <span>
+                            {ocorrencias} ocorrência(s)
+                          </span>
+
+                          {proximaAcao?.prazo && (
+                            <span
+                              className={
+                                proximaAcao.vencida
+                                  ? "text-rose-400"
+                                  : ""
+                              }
+                            >
+                              {proximaAcao.vencida
+                                ? "Vencida"
+                                : "Prazo"}
+                              {" · "}
+                              {fmtDate(
+                                proximaAcao.prazo
+                              )}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                }
+              )}
+
+              {guerraItems.length === 0 && (
+                <div className="col-span-full flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-white/[0.08]">
+                  <div className="text-center">
+                    <div className="text-sm font-semibold text-emerald-300">
+                      Operação sem ações críticas
+                    </div>
+
+                    <div className="mt-1 text-xs text-slate-600">
+                      Nenhum projeto exige ação imediata.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </Panel>
+
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1">
+          <div className="shrink-0"><Kpi
+            label="Ação imediata"
+            value={summary.criticos}
+            helper="Projetos críticos"
+            tone={
+              summary.criticos
+                ? "rose"
+                : "emerald"
+            }
+          /></div>
+
+          <div className="shrink-0"><Kpi
+            label="Bloqueios"
+            value={summary.bloqueados}
+            helper="Projetos com fluxo interrompido"
+            tone={
+              summary.bloqueados
+                ? "rose"
+                : "emerald"
+            }
+          /></div>
+
+          <div className="shrink-0"><Kpi
+            label="Pendências vencidas"
+            value={summary.pendenciasVencidas}
+            helper="Pendências reais fora do prazo"
+            tone={
+              summary.pendenciasVencidas
+                ? "rose"
+                : "emerald"
+            }
+          /></div>
+
+          <div className="shrink-0"><Kpi
+            label="Próximos Go-Lives"
+            value={proximosGoLivesGuerra.length}
+            helper={
+              proximoGoLiveGuerra
+                ? `${proximoGoLiveGuerra.nome} · ${fmtDate(
+                    proximoGoLiveGuerra.data_prevista
+                  )}`
+                : "Nenhum Go-Live próximo"
+            }
+            tone={
+              proximosGoLivesGuerra.length
+                ? "sky"
+                : "emerald"
+            }
+          /></div>
+
+          <div className="shrink-0"><Kpi
+            label="Ações vencidas"
+            value={summary.acoesVencidas}
+            helper="Ações reais que exigem tratamento"
+            tone={
+              summary.acoesVencidas
+                ? "amber"
+                : "emerald"
+            }
+          /></div>
+
+          <div className="shrink-0 rounded-2xl border border-white/[0.08] bg-black/[0.12] p-4">
+            <div className="text-[8px] font-semibold uppercase tracking-[.15em] text-slate-600">
+              Maior pressão
+            </div>
+
+            <div className="mt-2 truncate text-[16px] font-semibold text-white">
+              {maiorPressaoGuerra?.nome ||
+                "Sem pressão crítica"}
+            </div>
+
+            <div className="mt-1 text-[9px] text-slate-500">
+              {maiorPressaoGuerra
+                ? `${maiorPressaoGuerra.projetos} projeto(s) · ${maiorPressaoGuerra.criticos} crítico(s)`
+                : "Operação estável"}
+            </div>
+
+            {maiorPressaoGuerra && (
+              <div className="mt-3 text-2xl font-semibold text-rose-300">
+                {maiorPressaoGuerra.score}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-[99999] isolate h-[100dvh] w-screen overflow-hidden bg-[#040713] text-slate-100">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(14,165,233,.12),transparent_30%),radial-gradient(circle_at_100%_10%,rgba(139,92,246,.10),transparent_32%),linear-gradient(180deg,#071021_0%,#040713_100%)]" />
+      <div className="relative flex h-full min-h-0 flex-col gap-2 p-[clamp(8px,1vw,18px)] sm:gap-3">
+        <header className="flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-white/[0.08] bg-[#081126] px-[clamp(12px,1.2vw,22px)] py-2.5 shadow-2xl shadow-black/20 sm:gap-4 sm:py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300"><Activity size={17}/></span>
+            <div className="min-w-0"><div className="flex items-center gap-2"><span className="rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[.14em] text-emerald-300">Ao vivo</span><span className="text-[10px] uppercase tracking-[.14em] text-slate-500">WMS Expert · Control Tower Live</span></div><h1 className="mt-1 text-[clamp(17px,1.45vw,28px)] font-semibold tracking-[-.035em] text-white">{slides[slide].label === "Agora" ? "Visão Executiva" : slides[slide].label}</h1></div>
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <div
+              className={`hidden items-center gap-2 rounded-xl border px-3 py-2 text-[9px] font-semibold sm:flex ${
+                connected
+                  ? "border-emerald-400/20 bg-emerald-400/[.07] text-emerald-300"
+                  : "border-rose-400/25 bg-rose-400/[.08] text-rose-300"
+              }`}
+              title={connected ? "Conexão ativa" : "Sem conexão"}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  connected
+                    ? "bg-emerald-400 animate-pulse"
+                    : "bg-rose-400"
+                }`}
+              />
+              {connected ? "Conectado" : "Offline"}
+            </div>
+
+            <button onClick={()=>void loadExecutive()} disabled={refreshing} title="Atualizar dados executivos" className="hidden rounded-xl border border-white/[.07] bg-black/20 px-3 py-2 text-right transition hover:bg-white/[.04] disabled:opacity-60 md:block"><div className="flex items-center justify-end gap-1 text-[8px] uppercase tracking-[.14em] text-slate-600"><RefreshCw size={9} className={refreshing?"animate-spin":""}/>Última atualização</div><div className="text-[10px] font-medium text-slate-300">{lastUpdate.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</div></button>
+            <div className="rounded-xl border border-white/[.07] bg-black/20 px-3 py-2 text-right"><div className="text-[clamp(14px,1.15vw,21px)] font-semibold text-white">{now.toLocaleTimeString("pt-BR")}</div><div className="text-[8px] uppercase tracking-[.12em] text-slate-500">{now.toLocaleDateString("pt-BR",{weekday:"short",day:"2-digit",month:"short"})}</div></div>
+            <button
+              onClick={() => void goTvMode()}
+              title="Ativar Modo TV"
+              className="hidden h-10 items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-400/[.08] px-3 text-[10px] font-semibold text-violet-300 hover:bg-violet-400/[.14] lg:flex"
+            >
+              <Activity size={14}/>
+              Modo TV
+            </button>
+
+            <button
+              onClick={() => void goFullscreen()}
+              title={isFullscreen ? "Sair do fullscreen" : "Entrar em fullscreen"}
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-sky-400/20 bg-sky-400/[.07] text-sky-300 hover:bg-sky-400/[.13]"
+            >
+              <Maximize2 size={16}/>
+            </button>
+            <button onClick={exit} title="Sair do Control Tower Live (ESC)" className="flex h-10 items-center gap-2 rounded-xl border border-rose-400/25 bg-rose-400/[.08] px-3 text-[11px] font-semibold text-rose-300 hover:bg-rose-400/[.14]"><X size={16}/><span className="hidden sm:inline">Sair</span></button>
+          </div>
+        </header>
+
+        <nav className="relative flex shrink-0 items-center gap-1 rounded-2xl border border-white/[.08] bg-[#0a1330] p-1.5 sm:p-2">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">{slides.map((s,i)=>{const Icon=s.icon;return <button key={s.key} onClick={()=>setSlide(i)} className={`flex shrink-0 items-center gap-1.5 rounded-xl px-[clamp(9px,.8vw,14px)] py-2 text-[clamp(9px,.72vw,12px)] transition ${slide===i?"border border-sky-400/30 bg-sky-400/[.12] text-sky-300":"text-slate-500 hover:bg-white/[.04] hover:text-slate-300"}`}><Icon size={13}/>{s.label}</button>})}</div>
+          <div className="ml-1 flex shrink-0 items-center gap-1 sm:ml-2"><button onClick={prev} className="rounded-lg border border-white/[.08] p-2 text-slate-400"><ChevronLeft size={14}/></button><button onClick={()=>setAuto(v=>!v)} className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[10px] font-semibold ${auto?"border-emerald-400/20 bg-emerald-400/[.08] text-emerald-300":"border-white/[.08] text-slate-400"}`}>{auto?<Pause size={12}/>:<Play size={12}/>} {auto?"Pausar":"Auto"}</button><button onClick={()=>{const values=[10,15,30,60];const currentIndex=values.indexOf(rotationSeconds);const nextValue=values[(currentIndex+1)%values.length];setRotationSeconds(nextValue);window.localStorage.setItem("controlTowerLiveRotationSeconds",String(nextValue));}} title="Intervalo da rotação automática" className="rounded-lg border border-white/[.08] bg-black/20 px-2.5 py-2 text-[9px] font-semibold text-sky-300 hover:bg-white/[.04]">{rotationSeconds}s</button><span className="w-9 text-center text-[9px] text-slate-500">{slide+1}/{slides.length}</span><button onClick={next} className="rounded-lg border border-white/[.08] p-2 text-slate-400"><ChevronRight size={14}/></button></div>
+          {auto && <div key={rotationSeconds} className="absolute bottom-0 left-0 h-[2px] animate-[liveProgress_15s_linear_infinite] bg-cyan-400" style={{ animationDuration: String(rotationSeconds) + "s" }} />}
+        </nav>
+
+        {liveError && <div className="shrink-0 rounded-xl border border-rose-400/25 bg-rose-400/[.08] px-4 py-2 text-xs text-rose-300">Falha na atualização automática: {liveError}. Exibindo o último estado disponível.</div>}
+        <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden xl:overflow-hidden">{renderSlide()}</main>
+      </div>
+      <style jsx global>{`@keyframes liveProgress{from{width:0}to{width:100%}} body:has(.control-tower-live-lock){overflow:hidden}`}</style>
+      <div className="control-tower-live-lock hidden" />
+    </div>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+

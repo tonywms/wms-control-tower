@@ -14,6 +14,7 @@ import {
 
 type Projeto = {
   id: string;
+  cliente_id?: string | null;
   nome: string;
   plataforma?: string | null;
   etapa_id?: string | null;
@@ -38,6 +39,12 @@ type Etapa = {
 type Responsavel = {
   id: string;
   nome: string;
+};
+
+type Cliente = {
+  id: string;
+  nome: string;
+  cidade?: string | null;
 };
 
 type HistoricoItem = {
@@ -100,6 +107,7 @@ export default function ProjetoModal({
   onSaved,
 }: ProjetoModalProps) {
   const [form, setForm] = useState({
+    cliente_id: "",
     nome: "",
     plataforma: "",
     etapa_id: "",
@@ -115,6 +123,7 @@ export default function ProjetoModal({
     percentual: 0,
   });
 
+  const [clientes, setClientes] = useState<Cliente[]>([]);
   const [etapas, setEtapas] = useState<Etapa[]>([]);
   const [responsaveis, setResponsaveis] = useState<
     Responsavel[]
@@ -134,23 +143,43 @@ export default function ProjetoModal({
    */
 
   useEffect(() => {
-    if (!projeto || !open) return;
+    if (!open) return;
 
-    setForm({
-      nome: projeto.nome ?? "",
-      plataforma: projeto.plataforma ?? "",
-      etapa_id: projeto.etapa_id ?? "",
-      setor: projeto.setor ?? "",
-      responsavel_id: projeto.responsavel_id ?? "",
-      responsavel_nome: projeto.responsavel_nome ?? "",
-      status: projeto.status ?? "Não iniciado",
-      prioridade: projeto.prioridade ?? "Normal",
-      data_inicio: projeto.data_inicio ?? "",
-      data_fim: projeto.data_fim ?? "",
-      observacoes: projeto.observacoes ?? "",
-      fase_origem: projeto.fase_origem ?? "",
-      percentual: projeto.percentual ?? 0,
-    });
+    if (!projeto) {
+      setForm({
+        cliente_id: "",
+        nome: "",
+        plataforma: "",
+        etapa_id: "",
+        setor: "",
+        responsavel_id: "",
+        responsavel_nome: "",
+        status: "Não iniciado",
+        prioridade: "Normal",
+        data_inicio: "",
+        data_fim: "",
+        observacoes: "",
+        fase_origem: "",
+        percentual: 0,
+      });
+    } else {
+      setForm({
+        cliente_id: projeto.cliente_id ?? "",
+        nome: projeto.nome ?? "",
+        plataforma: projeto.plataforma ?? "",
+        etapa_id: projeto.etapa_id ?? "",
+        setor: projeto.setor ?? "",
+        responsavel_id: projeto.responsavel_id ?? "",
+        responsavel_nome: projeto.responsavel_nome ?? "",
+        status: projeto.status ?? "Não iniciado",
+        prioridade: projeto.prioridade ?? "Normal",
+        data_inicio: projeto.data_inicio ?? "",
+        data_fim: projeto.data_fim ?? "",
+        observacoes: projeto.observacoes ?? "",
+        fase_origem: projeto.fase_origem ?? "",
+        percentual: projeto.percentual ?? 0,
+      });
+    }
 
     setError("");
     setAba("dados");
@@ -169,23 +198,41 @@ export default function ProjetoModal({
 
     async function carregarOpcoes() {
       try {
-        const response = await fetch("/api/opcoes", {
-          cache: "no-store",
-        });
+        const [opcoesResponse, clientesResponse] = await Promise.all([
+          fetch("/api/opcoes", {
+            cache: "no-store",
+            credentials: "same-origin",
+          }),
+          fetch("/api/clientes", {
+            cache: "no-store",
+            credentials: "same-origin",
+          }),
+        ]);
 
-        if (!response.ok) {
+        if (!opcoesResponse.ok) {
           throw new Error(
             "Não foi possível carregar as opções.",
           );
         }
 
-        const result = await response.json();
+        if (!clientesResponse.ok) {
+          throw new Error(
+            "Não foi possível carregar os clientes.",
+          );
+        }
 
-        setEtapas(result.etapas ?? []);
-        setResponsaveis(result.responsaveis ?? []);
+        const [opcoesResult, clientesResult] = await Promise.all([
+          opcoesResponse.json(),
+          clientesResponse.json(),
+        ]);
+
+        setEtapas(opcoesResult.etapas ?? []);
+        setResponsaveis(opcoesResult.responsaveis ?? []);
+        setClientes(clientesResult.clientes ?? []);
       } catch {
         setEtapas([]);
         setResponsaveis([]);
+        setClientes([]);
       }
     }
 
@@ -225,7 +272,7 @@ export default function ProjetoModal({
     void carregarHistorico();
   }, [open, projeto, aba, carregarHistorico]);
 
-  if (!open || !projeto) {
+  if (!open) {
     return null;
   }
 
@@ -320,8 +367,8 @@ export default function ProjetoModal({
    */
 
   async function salvar() {
-    if (!projeto) return;
     const projetoAtual = projeto;
+    const criando = !projetoAtual;
 
     try {
       setSaving(true);
@@ -330,6 +377,12 @@ export default function ProjetoModal({
       if (!form.nome.trim()) {
         throw new Error(
           "Informe o nome do projeto.",
+        );
+      }
+
+      if (!form.cliente_id) {
+        throw new Error(
+          "Selecione o cliente do projeto.",
         );
       }
 
@@ -394,19 +447,24 @@ export default function ProjetoModal({
       console.log(
         "[ProjetoModal] Salvando projeto:",
         {
-          projeto_id: projetoAtual.id,
+          modo: criando ? "criacao" : "edicao",
+          projeto_id: projetoAtual?.id ?? null,
+          cliente_id: payload.cliente_id,
           etapa_id: payload.etapa_id,
           fase_origem: payload.fase_origem,
         },
       );
 
       const response = await fetch(
-        `/api/projetos/${projetoAtual.id}`,
+        criando
+          ? "/api/projetos"
+          : `/api/projetos/${projetoAtual.id}`,
         {
-          method: "PUT",
+          method: criando ? "POST" : "PUT",
           headers: {
             "Content-Type": "application/json",
           },
+          credentials: "same-origin",
           body: JSON.stringify(payload),
         },
       );
@@ -424,7 +482,9 @@ export default function ProjetoModal({
        * Confirma no console exatamente o que a API devolveu.
        */
       console.log(
-        "[ProjetoModal] Projeto atualizado:",
+        criando
+          ? "[ProjetoModal] Projeto criado:"
+          : "[ProjetoModal] Projeto atualizado:",
         result.projeto,
       );
 
@@ -465,11 +525,13 @@ export default function ProjetoModal({
             </div>
 
             <h2 className="mt-0.5 text-lg font-semibold text-white">
-              Editar projeto
+              {projeto ? "Editar projeto" : "Novo projeto"}
             </h2>
 
             <p className="mt-0.5 max-w-[520px] truncate text-xs text-slate-500">
-              {projeto.nome}
+              {projeto
+                ? projeto.nome
+                : "Cadastre um novo projeto na Control Tower"}
             </p>
           </div>
 
@@ -499,6 +561,7 @@ export default function ProjetoModal({
             )}
           </button>
 
+          {projeto && (
           <button
             type="button"
             onClick={() => setAba("historico")}
@@ -510,7 +573,7 @@ export default function ProjetoModal({
             <History size={14} />
             Histórico
             {historico.length > 0 && (
-              <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[9px] text-slate-400">
+              <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-1.5py-0.5 text-[9px] text-slate-400">
                 {historico.length}
               </span>
             )}
@@ -518,6 +581,7 @@ export default function ProjetoModal({
               <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-sky-400" />
             )}
           </button>
+          )}
         </div>
 
         {/* CONTEÚDO */}
@@ -526,6 +590,30 @@ export default function ProjetoModal({
           {aba === "dados" ? (
             <>
           <div className="grid grid-cols-1 gap-x-4 gap-y-3.5 md:grid-cols-2">
+
+            <Field label="Cliente">
+              <select
+                value={form.cliente_id}
+                onChange={(e) =>
+                  atualizar(
+                    "cliente_id",
+                    e.target.value,
+                  )
+                }
+                className="input"
+              >
+                <option value="">Selecione</option>
+                {clientes.map((cliente) => (
+                  <option
+                    key={cliente.id}
+                    value={cliente.id}
+                  >
+                    {cliente.nome}
+                    {cliente.cidade ? ` - ${cliente.cidade}` : ""}
+                  </option>
+                ))}
+              </select>
+            </Field>
 
             <Field label="Projeto">
               <input
@@ -850,8 +938,7 @@ export default function ProjetoModal({
                 </div>
               ) : (
                 <div className="relative">
-                  <div className="absolute bottom-3 left-[15px] top-3 w-px bg-white/[0.07]" />
-                  <div className="space-y-3">
+                  <div className="absolute bottom-3 left-[15px] top-3 w-px bg-white/[0.07]" />                  <div className="space-y-3">
                     {historico.map((item) => (
                       <HistoricoCard key={item.id} item={item} />
                     ))}
@@ -882,7 +969,11 @@ export default function ProjetoModal({
               className="flex items-center gap-2 rounded-xl bg-sky-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-              {saving ? "Salvando..." : "Salvar alterações"}
+              {saving
+                ? "Salvando..."
+                : projeto
+                  ? "Salvar alterações"
+                  : "Criar projeto"}
             </button>
           )}
         </div>
@@ -942,7 +1033,7 @@ function HistoricoCard({ item }: { item: HistoricoItem }) {
                 {textoValor(item.valor_anterior)}
               </span>
               <ArrowRight size={13} className="text-slate-600" />
-              <span className="max-w-[260px] truncate rounded-lg border border-emerald-400/10 bg-emerald-500/[0.06] px-2.5 py-1.5 font-medium text-emerald-300">
+              <span className="max-w-[260px] truncate rounded-lg border border-emerald-400/10bg-emerald-500/[0.06] px-2.5 py-1.5 font-medium text-emerald-300">
                 {textoValor(item.valor_novo)}
               </span>
             </div>

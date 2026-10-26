@@ -56,6 +56,10 @@ import AgendaExecutiva from "@/components/agenda/AgendaExecutiva";
 import PlanejamentoSemanal from "@/components/planejamento/PlanejamentoSemanal";
 import NotificationCenter from "@/components/notificacoes/NotificationCenter";
 import CentralInconsistencias from "@/components/governanca/CentralInconsistencias";
+import ImplantacaoCentral from "@/components/implantacao/ImplantacaoCentral";
+import DesenvolvimentoCentral from "@/components/desenvolvimento/DesenvolvimentoCentral";
+import SuporteCentral from "@/components/suporte/SuporteCentral";
+import ComercialCentral from "@/components/comercial/ComercialCentral";
 
 type Projeto = {
   id: string;
@@ -460,6 +464,16 @@ export default function Home() {
     },
     [projetos, openProjeto360],
   );
+
+  const openNewProjeto = useCallback(() => {
+    // Garante exclusividade entre os modais.
+    setProjeto360Open(false);
+    setProjeto360(null);
+
+    // Sem projeto selecionado = modo criação no ProjetoModal.
+    setSelectedProjeto(null);
+    setModalOpen(true);
+  }, []);
 
   const openEditProjeto = useCallback(
   (projeto: Projeto) => {
@@ -1570,7 +1584,11 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <button className="flex h-10 items-center gap-2 rounded-xl bg-sky-500 px-4 text-xs font-semibold text-slate-950 shadow-[0_8px_30px_rgba(14,165,233,0.12)] transition hover:bg-sky-400">
+                  <button
+                    type="button"
+                    onClick={openNewProjeto}
+                    className="flex h-10 items-center gap-2 rounded-xl bg-sky-500 px-4 text-xs font-semibold text-slate-950 shadow-[0_8px_30px_rgba(14,165,233,0.12)] transition hover:bg-sky-400"
+                  >
                     <Plus size={15} />
                     Novo projeto
                   </button>
@@ -1643,6 +1661,26 @@ export default function Home() {
                   onOpen360={(projeto) => openProjeto360(projeto as Projeto)}
                 />
               </div>
+            ) : selectedMenu === "Implantação" ? (
+              <ImplantacaoCentral
+                projetos={projetos}
+                onOpenProjeto={openProjeto360ById}
+              />
+            ) : selectedMenu === "Desenvolvimento" ? (
+              <DesenvolvimentoCentral
+                projetos={projetos}
+                onOpenProjeto={openProjeto360ById}
+              />
+            ) : selectedMenu === "Suporte" ? (
+              <SuporteCentral
+                projetos={projetos}
+                onOpenProjeto={openProjeto360ById}
+              />
+            ) : selectedMenu === "Comercial" ? (
+              <ComercialCentral
+                projetos={projetos}
+                onOpenProjeto={openProjeto360ById}
+              />
             ) : (
               <>
                 {/* =====================================================
